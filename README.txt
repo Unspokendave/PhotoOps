@@ -1,4 +1,4 @@
-DENK HUB — VERSION 1
+PhotoOps — VERSION 1
 
 Included:
 - Mobile-friendly dashboard

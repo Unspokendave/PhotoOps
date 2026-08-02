@@ -1,0 +1,9 @@
+{
+  "name": "Denk Hub",
+  "short_name": "Denk Hub",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#111827",
+  "description": "Mobile photography work schedule and assignment dashboard."
+}

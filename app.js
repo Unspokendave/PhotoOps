@@ -1,5 +1,5 @@
-const STORAGE_KEY = "denkHubAssignmentsV1";
-const SETTINGS_KEY = "denkHubSettingsV1";
+const STORAGE_KEY = "PhotoOpsAssignmentsV1";
+const SETTINGS_KEY = "PhotoOpsSettingsV1";
 
 let assignments = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
 let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{"displayName":"David Denk","leadTime":45,"dark":false}');

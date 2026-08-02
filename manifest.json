@@ -1,6 +1,6 @@
 {
-  "name": "Denk Hub",
-  "short_name": "Denk Hub",
+  "name": "PhotoOps",
+  "short_name": "PhotoOps",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#090d16",

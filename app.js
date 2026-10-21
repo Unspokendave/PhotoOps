@@ -154,6 +154,11 @@ function openDialog(id=null) {
 
 $("addManualBtn").addEventListener("click", () => openDialog());
 
+// Dismiss without submitting, validating, or changing saved assignments.
+["closeAssignmentBtn", "cancelAssignmentBtn"].forEach(id => {
+  $(id).addEventListener("click", () => $("assignmentDialog").close("cancel"));
+});
+
 $("assignmentForm").addEventListener("submit", e => {
   e.preventDefault();
   const id = $("editId").value || crypto.randomUUID();

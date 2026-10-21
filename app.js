@@ -15,7 +15,7 @@ const SETTINGS_KEY = "PhotoOpsSettingsV1";
 
 let loadedRaw = localStorage.getItem(STORAGE_KEY);
 let assignments = JSON.parse(loadedRaw || "[]");
-let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{"displayName":"","aliases":[],"importMode":"mine","leadTime":45,"dark":false}');
+let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{"displayName":"","aliases":[],"importMode":"mine","dark":false}');
 
 const $ = (id) => document.getElementById(id);
 const tabs = document.querySelectorAll(".tab");
@@ -27,7 +27,6 @@ $("nameFilter").value = settings.displayName || "";
 $("nameAliases").value = (settings.aliases || []).join("\n");
 $("importMode").value = settings.importMode === "all" ? "all" : "mine";
 $("viewDate").value = Planner.iso(new Date());
-$("defaultLeadTime").value = String(settings.leadTime || 45);
 
 tabs.forEach(tab => tab.addEventListener("click", () => {
   tabs.forEach(t => t.classList.remove("active"));
@@ -46,11 +45,6 @@ $("displayName").addEventListener("change", e => {
   settings.displayName = e.target.value.trim();
   cancelPreview();
   $("nameFilter").value = settings.displayName;
-  saveSettings();
-});
-
-$("defaultLeadTime").addEventListener("change", e => {
-  settings.leadTime = Number(e.target.value);
   saveSettings();
 });
 

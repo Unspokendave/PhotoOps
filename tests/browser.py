@@ -24,6 +24,9 @@ try:
    c=b.new_context(viewport={'width':width,'height':height},is_mobile=width<1000,has_touch=width<1000)
    page=c.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    page.goto(url);page.evaluate("a=>{localStorage.setItem('PhotoOpsAssignmentsV1',JSON.stringify([a]));localStorage.setItem('PhotoOpsSettingsV1',JSON.stringify({displayName:'David Denk',aliases:[],importMode:'mine',leadTime:60,dark:true}));}",old);page.reload();initial=raw(page)
+   assert page.locator('#defaultLeadTime').count()==0
+   assert page.get_by_text('Reminder lead time',exact=True).count()==0
+   assert page.evaluate('settings.leadTime')==60  # Legacy setting is inert and not erased on load.
    assert page.locator('#syncPreview').count()==0 and page.locator('[data-tab="team"]').count()==0
    for kind in ['add','edit']:
     for filled in [False,True]:
@@ -94,7 +97,7 @@ try:
    page.wait_for_function('attention.length>0');assert page.evaluate('assignments[0]')==old
    page.locator('[data-tab="schedule"]').click()
    with page.expect_download() as dl:page.locator(f'#scheduleList [data-id="{assignment_id}"] .calendar-btn').click()
-   assert 'BEGIN:VEVENT' in Path(dl.value.path()).read_text()
+   calendar=Path(dl.value.path()).read_text();assert 'BEGIN:VEVENT' in calendar and 'VALARM' not in calendar
    page.evaluate('navigator.serviceWorker.ready');page.reload();page.wait_for_function('navigator.serviceWorker.controller !== null')
    c.set_offline(True);page.reload();assert page.title()=='PhotoOps'
    assert page.evaluate('assignments[0]')==old and page.locator('#importBtn').inner_text()=='Import & Update Schedule'

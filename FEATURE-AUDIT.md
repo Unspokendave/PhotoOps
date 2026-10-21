@@ -27,3 +27,7 @@ cleared by the browser/OS, so export off-device backups. Tests use Chromium at
 390×844, 768×1024 and 1440×1000, not physical iOS/Safari devices or native Windows.
 See IMPORTING.md for the simplified workflow and specific recognition regressions.
 No merge or deployment is part of this change.
+
+Reminder lead time has been removed from the current Settings UI and runtime.
+It never scheduled notifications or calendar alarms. New settings omit it; any
+legacy stored value is left inert to avoid rewriting users’ settings on startup.

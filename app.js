@@ -1,3 +1,11 @@
+const Planner = PhotoOpsPlanner;
+const Store = PhotoOpsStore;
+// Complete or roll back an interrupted two-store backup restoration before reading data.
+Store.recover(localStorage);
+const SCHOOLS_KEY = "PhotoOpsSchoolsV1";
+let loadedSchoolsRaw = localStorage.getItem(SCHOOLS_KEY);
+let schools = JSON.parse(loadedSchoolsRaw || "[]");
+let lastSuggestedAddress = null;
 const STORAGE_KEY = "PhotoOpsAssignmentsV1";
 const Sync = PhotoOpsSync;
 const BACKUP_PREFIX = "PhotoOpsSyncBackupV21:";
@@ -18,7 +26,7 @@ $("displayName").value = settings.displayName || "";
 $("nameFilter").value = settings.displayName || "";
 $("nameAliases").value = (settings.aliases || []).join("\n");
 $("importMode").value = settings.importMode || "mine";
-$("viewDate").value = new Date().toLocaleDateString("en-CA");
+$("viewDate").value = Planner.iso(new Date());
 $("defaultLeadTime").value = String(settings.leadTime || 45);
 
 tabs.forEach(tab => tab.addEventListener("click", () => {
@@ -59,13 +67,17 @@ function saveAssignments(next) {
 
 // A single localStorage replacement commits the assignment array atomically.
 // Keep a durable exact pre-write snapshot; quota errors stop the write.
-async function commitBulk(next, expected) {
+async function commitBulk(next, expected, nextSchools, expectedSchools) {
   const commit = () => {
     if (localStorage.getItem(STORAGE_KEY) !== expected) throw new Error("Saved assignments changed. Preview the schedule again before applying it.");
-    const backup = {createdAt:new Date().toISOString(),assignmentsRaw:expected,settingsRaw:localStorage.getItem(SETTINGS_KEY)};
+    const backup = {createdAt:new Date().toISOString(),assignmentsRaw:expected,settingsRaw:localStorage.getItem(SETTINGS_KEY),schoolsRaw:localStorage.getItem(SCHOOLS_KEY)};
     localStorage.setItem(BACKUP_PREFIX + backup.createdAt + ":" + crypto.randomUUID(), JSON.stringify(backup));
     if (localStorage.getItem(STORAGE_KEY) !== expected) throw new Error("Another tab changed assignments. Preview again.");
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    const writes={[STORAGE_KEY]:JSON.stringify(next)};
+    const check={[STORAGE_KEY]:expected};
+    if(nextSchools !== undefined) { writes[SCHOOLS_KEY]=JSON.stringify(nextSchools); check[SCHOOLS_KEY]=expectedSchools; }
+    Store.transaction(localStorage,check,writes);
+    if(nextSchools !== undefined) { schools=nextSchools; loadedSchoolsRaw=localStorage.getItem(SCHOOLS_KEY); renderSchools(); }
     assignments = next; loadedRaw=localStorage.getItem(STORAGE_KEY);
     renderAll();
   };
@@ -86,7 +98,7 @@ $("syncBackupBtn").addEventListener("click", () => {
   const keys=Object.keys(localStorage).filter(k=>k.startsWith(BACKUP_PREFIX)).sort();
   if(!keys.length) { alert("No safety backups yet. One is saved before synchronization or backup restoration."); return; }
   const backup=JSON.parse(localStorage.getItem(keys.at(-1)));
-  downloadBlob("photoops-safety-backup.json",JSON.stringify({assignments:JSON.parse(backup.assignmentsRaw || "[]"),settings:JSON.parse(backup.settingsRaw || "{}"),createdAt:backup.createdAt},null,2),"application/json");
+  downloadBlob("photoops-safety-backup.json",JSON.stringify({assignments:JSON.parse(backup.assignmentsRaw || "[]"),settings:JSON.parse(backup.settingsRaw || "{}"),schools:JSON.parse(backup.schoolsRaw || "[]"),createdAt:backup.createdAt},null,2),"application/json");
 });
 
 function assignmentDateTime(a) {
@@ -168,29 +180,153 @@ function escapeHtml(value="") {
   return value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function applyScheduleFilters() {
-  const term = $("searchInput").value.toLowerCase().trim();
-  const status = $("statusFilter").value;
-  const list = [...assignments]
-    .filter(a => Sync.inView(a, $("scheduleView").value, $("viewDate").value))
-    .filter(a => status === "all" || a.status === status)
-    .filter(a => [a.school,a.location,a.address,a.notes,a.scheduleNotes,a.scheduleDetails,a.assignmentType,...(a.photographers || [])].join(" ").toLowerCase().includes(term))
-    .sort((a,b) => assignmentDateTime(a) - assignmentDateTime(b));
-  renderList($("scheduleList"), list);
+function saveSchools(next) {
+  const backup={createdAt:new Date().toISOString(),assignmentsRaw:localStorage.getItem(STORAGE_KEY),settingsRaw:localStorage.getItem(SETTINGS_KEY),schoolsRaw:localStorage.getItem(SCHOOLS_KEY)};
+  if(backup.schoolsRaw!==loadedSchoolsRaw)throw new Error("The school directory changed in another tab. Reload before saving.");
+  localStorage.setItem(BACKUP_PREFIX+backup.createdAt+":"+crypto.randomUUID(),JSON.stringify(backup));
+  Store.transaction(localStorage,{[SCHOOLS_KEY]:loadedSchoolsRaw},{[SCHOOLS_KEY]:JSON.stringify(next)});
+  schools=next;loadedSchoolsRaw=localStorage.getItem(SCHOOLS_KEY);renderSchools();
 }
+function schoolSuggestion(school) {return `${school.name} — ${school.city}, ${school.state} (${school.zip})`;}
+function renderSchools() {
+  const list=Planner.searchSchools(schools,$("schoolSearch").value);
+  $("schoolCount").textContent=`${list.length} saved school${list.length===1?"":"s"}`;
+  const directory=$("schoolDirectory");directory.replaceChildren();
+  if(!list.length) {const empty=document.createElement("p");empty.className="empty-state";empty.textContent=schools.length?"No schools match your search.":"No schools saved yet. Add a school to reuse its address.";directory.append(empty);}
+  for(const school of list) {
+    const card=document.createElement("article");card.className="form-card";card.dataset.schoolId=school.id;
+    const title=document.createElement("h3");title.textContent=school.name;
+    const address=document.createElement("p");address.textContent=Planner.schoolAddress(school);
+    const phone=document.createElement("p");phone.textContent=school.phone || "";
+    const notes=document.createElement("p");notes.textContent=school.notes || "";
+    const actions=document.createElement("div");actions.className="button-row";
+    const edit=document.createElement("button");edit.type="button";edit.className="secondary-btn";edit.textContent="Edit";edit.setAttribute("aria-label",`Edit ${school.name}`);edit.addEventListener("click",()=>openSchoolDialog(school.id));
+    const directions=document.createElement("a");directions.className="secondary-btn";directions.textContent="Directions";directions.href=`https://maps.apple.com/?q=${encodeURIComponent(Planner.schoolAddress(school))}`;directions.target="_blank";directions.rel="noopener";
+    const remove=document.createElement("button");remove.type="button";remove.className="danger-btn";remove.textContent="Remove";remove.setAttribute("aria-label",`Remove ${school.name}`);
+    remove.addEventListener("click",()=>{if(confirm(`Remove ${school.name} from the directory? Existing assignments and their addresses will remain unchanged.`))try {saveSchools(schools.filter(s=>s.id!==school.id));}catch(error){alert(`School removal stopped: ${error.message}`);}});
+    actions.append(edit,directions,remove);card.append(title,address,phone,notes,actions);directory.append(card);
+  }
+  $("schoolSuggestions").replaceChildren();
+  for(const school of [...schools].sort((a,b)=>a.name.localeCompare(b.name))) {const option=document.createElement("option");option.value=schoolSuggestion(school);$("schoolSuggestions").append(option);}
+}
+function openSchoolDialog(id) {
+  const school=schools.find(s=>s.id===id);
+  $("schoolDialogTitle").textContent=school?"Edit School":"Add School";$("schoolEditId").value=school?.id || "";
+  for(const [field,id] of [["name","schoolName"],["address","schoolAddress"],["city","schoolCity"],["state","schoolState"],["zip","schoolZip"],["phone","schoolPhone"],["notes","schoolNotes"]])$(id).value=school?.[field] || "";
+  $("schoolMessage").textContent="";$("schoolDialog").showModal();
+}
+$("schoolSearch").addEventListener("input",renderSchools);
+$("addSchoolBtn").addEventListener("click",()=>openSchoolDialog());
+for(const id of ["closeSchoolBtn","cancelSchoolBtn"])$(id).addEventListener("click",()=>$("schoolDialog").close());
+$("schoolForm").addEventListener("submit",event=>{
+  event.preventDefault();const id=$("schoolEditId").value || crypto.randomUUID();const school={...schools.find(s=>s.id===id),id};
+  for(const [field,id] of [["name","schoolName"],["address","schoolAddress"],["city","schoolCity"],["state","schoolState"],["zip","schoolZip"],["phone","schoolPhone"],["notes","schoolNotes"]])school[field]=$(id).value.trim();
+  try {saveSchools(Planner.saveSchool(schools,school));$("schoolDialog").close();}
+  catch(error) {$("schoolMessage").textContent=error.message;}
+});
+$("school").addEventListener("input",()=>{$("assignmentSchoolId").value="";});
+$("address").addEventListener("input",()=>{lastSuggestedAddress=null;});
+$("school").addEventListener("change",()=>{
+  const value=Planner.norm($("school").value);
+  const matches=schools.filter(s=>Planner.norm(schoolSuggestion(s))===value || Planner.norm(s.name)===value);
+  if(matches.length!==1)return;
+  const school=matches[0],address=Planner.schoolAddress(school),current=$("address").value;
+  $("school").value=school.name;$("assignmentSchoolId").value=school.id;
+  if(current && current!==lastSuggestedAddress && Planner.norm(current)!==Planner.norm(address) && !confirm("Replace this assignment's custom address with the saved school address? Choose Cancel to keep your address."))return;
+  $("address").value=address;lastSuggestedAddress=address;
+});
 
-$("scheduleView").addEventListener("change", applyScheduleFilters);
-$("viewDate").addEventListener("change", applyScheduleFilters);
-
-$("searchInput").addEventListener("input", applyScheduleFilters);
-$("statusFilter").addEventListener("change", applyScheduleFilters);
+function refreshFilterOptions() {
+  for(const [id,values,first] of [["schoolFilter",assignments.map(a=>a.school),"All schools"],["typeFilter",assignments.map(a=>a.assignmentType).filter(Boolean),"All types"]]) {
+    const select=$(id),previous=select.value;
+    select.replaceChildren(new Option(first,""));
+    [...new Map(values.map(v=>[Planner.norm(v),v])).values()].sort((a,b)=>a.localeCompare(b)).forEach(v=>select.add(new Option(v,v)));
+    // Keep an active value even if a sync removed the last matching occurrence.
+    if(previous && ![...select.options].some(o=>o.value===previous))select.add(new Option(previous,previous));
+    select.value=previous;
+  }
+}
+function chooseCalendarDay(value) {
+  $("viewDate").value=value; $("scheduleView").value="day"; applyScheduleFilters();
+}
+function calendarEvent(a) {
+  const button=document.createElement("button");button.type="button";button.className="calendar-event";
+  button.textContent=`${a.startTime ? formatTime(a.startTime) : a.arrivalTime ? "Arrival " + formatTime(a.arrivalTime) : "Time TBD"} · ${a.school}`;
+  button.setAttribute("aria-label",`${a.school}, ${formatDate(a.date)}, ${a.startTime || "time TBD"}, view assignment details`);
+  button.addEventListener("click",()=>openDialog(a.id));return button;
+}
+function renderCalendar(list,view,anchor) {
+  const container=$("calendarView");container.replaceChildren();
+  $("scheduleList").hidden=view!=="all";
+  if(view==="all") { $("calendarHeading").textContent="All assignments"; if(list.length)renderList($("scheduleList"),list);else $("scheduleList").replaceChildren();return; }
+  $("scheduleList").replaceChildren();
+  $("calendarHeading").textContent=view==="month"?PlannerDate(anchor).toLocaleDateString(undefined,{month:"long",year:"numeric"}):view==="week"?`${formatDate(Planner.monday(anchor))} – ${formatDate(Planner.addDays(Planner.monday(anchor),6))}`:formatDate(anchor);
+  if(view==="day") {
+    const timeline=document.createElement("ol");timeline.className="day-timeline";timeline.setAttribute("aria-label","Daily assignment timeline");
+    for(const a of list) {
+      const row=document.createElement("li");const clock=document.createElement("time");clock.textContent=a.startTime?formatTime(a.startTime):a.arrivalTime?"Arrival "+formatTime(a.arrivalTime):"Time TBD";
+      if(a.startTime || a.arrivalTime)clock.dateTime=a.date+"T"+(a.startTime || a.arrivalTime);
+      row.append(clock,createAssignmentCard(a));timeline.append(row);
+    }
+    container.append(timeline);return;
+  }
+  const scroll=document.createElement("div");scroll.className="calendar-scroll";scroll.tabIndex=0;scroll.setAttribute("role","region");scroll.setAttribute("aria-label",view==="week"?"Seven-day calendar; scroll horizontally on small screens":"Monthly calendar");
+  const grid=document.createElement("div");grid.className=`calendar-grid calendar-${view}`;
+  const dates=Planner.days(anchor,view),today=Planner.iso(new Date());
+  if(view==="month") for(const name of ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]) {const head=document.createElement("div");head.className="weekday";head.textContent=name;grid.append(head);}
+  for(const day of dates) {
+    const cell=document.createElement("section");cell.className="calendar-day";cell.dataset.date=day;
+    if(day===today)cell.classList.add("is-today");
+    if(view==="month" && day.slice(0,7)!==anchor.slice(0,7))cell.classList.add("outside-month");
+    const heading=document.createElement("button");heading.type="button";heading.className="calendar-date";
+    heading.textContent=view==="week"?PlannerDate(day).toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}):String(PlannerDate(day).getDate());
+    heading.setAttribute("aria-label",`View day ${formatDate(day)}`);if(day===today)heading.setAttribute("aria-current","date");
+    heading.addEventListener("click",()=>chooseCalendarDay(day));cell.append(heading);
+    const events=list.filter(a=>a.date===day);
+    if(events.length) {const count=document.createElement("span");count.className="calendar-count";count.setAttribute("aria-label",`${events.length} assignment${events.length===1?"":"s"}`);
+      const number=document.createElement("span");number.textContent=String(events.length);const word=document.createElement("span");word.className="calendar-count-word";word.textContent=` assignment${events.length===1?"":"s"}`;count.append(number,word);cell.append(count);}
+    (view==="month"?events.slice(0,2):events).forEach(a=>cell.append(calendarEvent(a)));
+    if(view==="month" && events.length>2) {const more=document.createElement("button");more.type="button";more.className="calendar-date";more.textContent=`+${events.length-2} more`;more.addEventListener("click",()=>chooseCalendarDay(day));cell.append(more);}
+    grid.append(cell);
+  }
+  scroll.append(grid);
+  if(view==="week") {const hint=document.createElement("p");hint.className="calendar-scroll-hint";hint.textContent="Swipe or scroll horizontally to see all seven days.";container.append(hint);}
+  container.append(scroll);
+}
+const PlannerDate=value=>new Date(value+"T12:00:00");
+function applyScheduleFilters() {
+  refreshFilterOptions();
+  const start=$("filterStart").value,end=$("filterEnd").value;
+  const view=$("scheduleView").value,anchor=$("viewDate").value || Planner.iso(new Date());
+  const invalid=start && end && start>end;
+  const list=invalid?[]:Planner.filter(assignments,{search:$("searchInput").value,status:$("statusFilter").value,school:$("schoolFilter").value,start,end,type:$("typeFilter").value,view,anchor});
+  $("filterCount").textContent=`${list.length} matching assignment${list.length===1?"":"s"}${view!=="all"?" in this calendar period":" across all dates"}`;
+  $("filterEmpty").hidden=!!list.length;
+  $("filterEmpty").textContent=invalid?"Start date must be on or before end date.":"No assignments match. Try another date or view, or reset your filters.";
+  renderCalendar(list,view,anchor);
+}
+for(const id of ["scheduleView","viewDate","statusFilter","schoolFilter","typeFilter","filterStart","filterEnd"])$(id).addEventListener("change",applyScheduleFilters);
+$("searchInput").addEventListener("input",applyScheduleFilters);
+$("resetFilters").addEventListener("click",()=>{
+  for(const id of ["searchInput","schoolFilter","typeFilter","filterStart","filterEnd"])$(id).value="";
+  $("statusFilter").value="all";applyScheduleFilters();
+});
+for(const [id,direction] of [["calendarPrevious",-1],["calendarNext",1]])$(id).addEventListener("click",()=>{
+  if($("scheduleView").value==="all")$("scheduleView").value="day";
+  $("viewDate").value=Planner.navigate($("viewDate").value || Planner.iso(new Date()),$("scheduleView").value,direction);applyScheduleFilters();
+});
+$("calendarToday").addEventListener("click",()=>{
+  $("viewDate").value=Planner.iso(new Date());if($("scheduleView").value==="all")$("scheduleView").value="day";applyScheduleFilters();
+});
 
 function openDialog(id=null) {
   const a = assignments.find(x => x.id === id);
   $("dialogTitle").textContent = a ? "Edit Assignment" : "Add Assignment";
   $("editId").value = a?.id || "";
   $("school").value = a?.school || "";
-  $("date").value = a?.date || new Date().toISOString().slice(0,10);
+  $("assignmentSchoolId").value = a?.schoolId || "";
+  lastSuggestedAddress=null;
+  $("date").value = a?.date || Planner.iso(new Date());
   $("startTime").value = a?.startTime || "";
   $("endTime").value = a?.endTime || "";
   $("status").value = a?.status || "confirmed";
@@ -218,10 +354,12 @@ function openDialog(id=null) {
     });
     $("assignmentHistory").appendChild(button);
   });
+  $("dialogCalendarBtn").hidden=!a;
   $("deleteAssignmentBtn").style.display = a ? "inline-block" : "none";
   $("assignmentDialog").showModal();
 }
 
+$("dialogCalendarBtn").addEventListener("click",()=>{const a=assignments.find(a=>a.id===$("editId").value);if(a)downloadICS(a);});
 $("addManualBtn").addEventListener("click", () => openDialog());
 
 // Dismiss without submitting, validating, or changing saved assignments.
@@ -241,6 +379,7 @@ $("assignmentForm").addEventListener("submit", e => {
     photographers: $("photographers").value.split(",").map(s=>s.trim()).filter(Boolean),
     contacts: previous && $("contacts").value === (typeof previous.contacts === "string" ? previous.contacts : (previous.contacts == null ? "" : JSON.stringify(previous.contacts))) ? previous.contacts : $("contacts").value,
     school: $("school").value.trim(),
+    schoolId: $("assignmentSchoolId").value || undefined,
     date: $("date").value,
     startTime: $("startTime").value,
     endTime: $("endTime").value,
@@ -396,7 +535,7 @@ function downloadBlob(name, content, type) {
 }
 
 $("exportBtn").addEventListener("click", () => {
-  downloadBlob("photoops-backup.json", JSON.stringify({schemaVersion:21,assignments,settings}, null, 2), "application/json");
+  downloadBlob("photoops-backup.json", JSON.stringify({schemaVersion:21,assignments,settings,schools}, null, 2), "application/json");
 });
 
 $("backupInput").addEventListener("change", async e => {
@@ -406,13 +545,16 @@ $("backupInput").addEventListener("change", async e => {
     const data = JSON.parse(await file.text());
     if(!Array.isArray(data.assignments) || data.assignments.some(a=>!a || typeof a.id!=="string" || !Sync.validDate(a.date) || typeof a.school!=="string" || !a.school.trim())) throw new Error("Invalid backup");
     if(!confirm("Merge this backup into your assignments? Existing records are kept, and a safety backup is saved first.")) return;
+    if(data.schools!==undefined && !Array.isArray(data.schools))throw new Error("Invalid school directory in backup");
+    const expectedSchools=localStorage.getItem(SCHOOLS_KEY);
+    const directoryMerge=Planner.mergeSchools(JSON.parse(expectedSchools || "[]"),data.schools || []);
     const expected=localStorage.getItem(STORAGE_KEY);
     const current=JSON.parse(expected || "[]");
     // Preserve current records on ID conflicts; restoration of an individual version is explicit.
-    const merged=[...current,...data.assignments.filter(a=>!current.some(old=>old.id===a.id))];
-    await commitBulk(merged,expected);
+    const merged=[...current,...data.assignments.filter(a=>!current.some(old=>old.id===a.id)).map(a=>directoryMerge.idMap[a.schoolId]?{...a,schoolId:directoryMerge.idMap[a.schoolId]}:a)];
+    await commitBulk(merged,expected,data.schools===undefined?undefined:directoryMerge.schools,expectedSchools);
     cancelPreview();
-    alert("Backup merged. Existing assignments and settings were preserved.");
+    alert("Backup merged. Existing assignments, schools, and settings were preserved.");
   } catch(error) {
     alert(`Backup import stopped: ${error.message}`);
   }
@@ -428,4 +570,5 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("service-worker.js").catch(() => {});
 }
 
+renderSchools();
 renderAll();

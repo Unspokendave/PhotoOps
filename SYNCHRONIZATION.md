@@ -137,3 +137,69 @@ Browser tests require Python Playwright and `/usr/bin/chromium`, start their own
 HTTP server, and use isolated browser contexts. They exercise desktop, iPhone,
 and iPad sizes, including quota/commit failure simulation and another-tab writes.
 Physical iOS/Safari and OS storage eviction are not simulated.
+
+## Completed calendars, School Directory and advanced filters
+
+The Schedule tab now has an All Dates list, a chronological Day timeline, a
+seven-column Monday–Sunday Week grid, and a traditional six-row Month grid.
+Previous / Next move the displayed period (month-end dates are clamped); Today
+returns to the current date without clearing active filters. Picking a grid date
+opens its Day view. Assignment buttons open the existing Details window, where
+Add to Calendar exports the saved assignment. Day/list cards retain their export
+buttons. Mobile Week view scrolls within its own container; Month keeps seven
+columns with compact assignment indicators. Calendar colors follow dark mode.
+Historical dates remain available without aging out or modifying any records.
+
+Advanced filters combine exact school name, assignment type, inclusive start/end
+dates, status and the existing text search. All views use the same filter function.
+Counts describe the matching assignments in the displayed period, or across all
+dates in All Dates. Reset Filters clears search, school, type, range and status,
+while preserving the displayed calendar period. Invalid ranges get an explicit
+message. Calendar navigation does not clear filters. School/type options reflect
+saved assignments, including historical school names and active filter values.
+
+Schools is a separate tab. A local school entry stores name, street address, city,
+state/region, ZIP/postal code, optional phone and notes. Add, edit, search, Directions,
+and confirmed removal are available. Name + city + state comparisons ignore case
+and repeated whitespace to prevent accidental duplicates. Distinct campuses in
+the same city should have distinct names. No fixed school or organization is built
+in. Directory suggestions use the assignment School input's native autocomplete
+list, with city/state/postal code to distinguish same-name schools. Selecting one
+fills the address; a pre-existing custom address requires confirmation before
+replacement. Individual assignments can override the address without editing the
+school. Editing, renaming or removing a school never rewrites assignment snapshots.
+Assignments may retain the removed school's ID as historical linkage.
+
+The directory uses the additive `PhotoOpsSchoolsV1` key. No startup migration or
+rewrite of original assignments/settings is needed. School changes receive safety
+backups, including the current directory. Ordinary and safety exports include
+`schools`. Old backups without schools leave the directory untouched. Directory
+restore merges entries by UUID or normalized school identity, preserves current
+fields on conflicts, and remaps school references for newly restored assignments.
+It does not replace existing assignments, settings, school edits or custom addresses.
+
+When restoring both assignments and schools, the app writes a recovery journal
+under `PhotoOpsRestoreJournalV21` before changing either store. On success it clears
+the journal. A failed write rolls back both previous raw values; an interrupted
+restore is rolled back before the next startup reads assignments or schools. This
+extends the original single-key sync protection without changing the assignment
+array format. A pending or invalid recovery journal blocks new transactions until
+recovery, rather than silently accepting a partial restore. Normal synchronization
+still changes only the assignment store and never clears directory information.
+Clear Assignments retains the directory and safety backups; remove schools explicitly.
+
+Additional validation:
+
+```sh
+node --test tests/*.test.js
+python3 tests/browser.py
+python3 tests/planner_browser.py
+node --check planner.js
+node --check storage.js
+```
+
+Coverage includes leap years/month-end navigation, chronological timelines, grid
+placement, Today/date/event navigation, combined filters/counts/reset, duplicate
+schools, editing/search/autofill/custom overrides, directory removal preserving
+assignments, old/new backup formats, failed two-store writes, startup recovery,
+dark mode, offline loading, and desktop/iPhone/iPad viewport sizes in Chromium.

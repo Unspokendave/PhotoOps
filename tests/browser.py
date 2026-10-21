@@ -87,7 +87,10 @@ try:
    page.locator('[data-tab="schedule"]').click();page.locator('#viewDate').fill('2000-01-02')
    for view in ['day','week','month','all']:
     page.locator('#scheduleView').select_option(view)
-    assert page.locator('#scheduleList').get_by_text('Historical School',exact=True).count()==1
+    if view in ['all','day']:
+     assert page.locator('#scheduleList' if view=='all' else '#calendarView').get_by_text('Historical School',exact=True).count()==1
+    else:
+     assert page.locator('#calendarView .calendar-event').filter(has_text='Historical School').count()==1
    with page.expect_download() as download:page.locator(f'#scheduleList [data-id="{assignment_id}"] .calendar-btn').click()
    assert 'BEGIN:VEVENT' in Path(download.value.path()).read_text()
    page.locator(f'#scheduleList [data-id="{assignment_id}"] .details-btn').click()

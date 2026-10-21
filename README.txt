@@ -26,3 +26,6 @@ Your schedule stays in that browser's local storage unless you export a backup.
 
 PhotoOps 2.1 development: see SYNCHRONIZATION.md for safe repeated imports,
 matching, review modes, local backups, restoration, historical views, and tests.
+
+Completed scheduling features: see FEATURE-AUDIT.md for the calendar layouts,
+School Directory, advanced filters, implementation files and validation scope.

@@ -29,6 +29,7 @@
     <nav class="tabs" aria-label="Main navigation">
       <button class="tab active" data-tab="dashboard">Dashboard</button>
       <button class="tab" data-tab="schedule">Schedule</button>
+      <button class="tab" data-tab="team">Team</button>
       <button class="tab" data-tab="import">Import</button>
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
@@ -70,10 +71,27 @@
       <div id="scheduleList" class="assignment-list"></div>
     </section>
 
+    <section id="team" class="panel">
+      <h2>Team</h2>
+      <p>Choose a coworker to see their assignments. Counts reflect the selected assignment type.</p>
+      <div class="toolbar">
+        <input id="teamSearch" type="search" placeholder="Search coworkers" aria-label="Search coworkers" />
+        <select id="teamTypeFilter" aria-label="Filter Team by assignment type"><option value="all">All assignment types</option></select>
+      </div>
+      <div id="teamDirectory" class="team-directory" aria-live="polite"></div>
+      <h3 id="teamAssignmentsHeading">Select a coworker</h3>
+      <div id="teamAssignments" class="assignment-list"></div>
+      <details class="team-unresolved">
+        <summary id="teamUnresolvedSummary">Assignments without identified photographers</summary>
+        <p>These rows are retained, but no coworker names were inferred. Check the original notes and reimport with an explicit “Photographers: Name, Name” roster.</p>
+        <div id="teamUnresolved" class="assignment-list"></div>
+      </details>
+    </section>
+
     <section id="import" class="panel">
       <article class="form-card">
         <h2>Import Work Schedule</h2>
-        <p>Paste the full company schedule. Denk Hub will keep entries containing your name.</p>
+        <p>Paste the full company schedule. Your assignments go to Schedule; coworker assignments appear in Team. Names are read from trailing comma-separated rosters or explicit “Photographers:” labels. Unclear rows are retained for review in Team.</p>
 
         <label for="nameFilter">Name to find</label>
         <input id="nameFilter" value="David Denk" />
@@ -181,6 +199,8 @@
         </div>
         <p class="time-line"></p>
         <p class="location-line"></p>
+        <p class="type-line"></p>
+        <p class="photographers-line"></p>
         <p class="notes-line"></p>
         <div class="card-actions">
           <button class="small-btn details-btn">Details</button>
@@ -191,6 +211,7 @@
     </article>
   </template>
 
+  <script src="schedule.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

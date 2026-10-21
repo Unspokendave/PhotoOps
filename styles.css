@@ -47,7 +47,7 @@ main { max-width: 850px; margin: 0 auto; padding: 18px 16px 110px; }
 .hero-card h2 { font-size: 1.45rem; margin-bottom: 8px; }
 .hero-card p:last-child { margin-bottom: 0; opacity: .9; }
 .tabs {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px;
   padding: 6px; background: var(--surface); border: 1px solid var(--border);
   border-radius: 16px; position: sticky; top: 86px; z-index: 10; box-shadow: var(--shadow);
   margin-bottom: 18px;
@@ -125,3 +125,11 @@ dialog::backdrop { background: rgba(0,0,0,.55); backdrop-filter: blur(4px); }
   .stack-mobile { flex-direction: column; }
   .stack-mobile > * { width: 100%; }
 }
+
+.team-directory { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; margin-bottom: 22px; }
+.coworker-btn { text-align: left; overflow-wrap: anywhere; }
+.coworker-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
+.team-unresolved { margin-top: 24px; }
+.team-unresolved summary { cursor: pointer; margin-bottom: 12px; }
+.assignment-main { min-width: 0; overflow-wrap: anywhere; }
+button:focus-visible { outline: 3px solid var(--muted); outline-offset: 2px; }

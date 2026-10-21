@@ -1,4 +1,8 @@
 const STORAGE_KEY = "PhotoOpsAssignmentsV1";
+const TEAM_KEY = "PhotoOpsTeamAssignmentsV1";
+const Schedule = PhotoOpsSchedule;
+let teamAssignments = JSON.parse(localStorage.getItem(TEAM_KEY) || "[]");
+let selectedCoworker = "";
 const SETTINGS_KEY = "PhotoOpsSettingsV1";
 
 let assignments = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
@@ -24,12 +28,14 @@ $("themeBtn").addEventListener("click", () => {
   document.body.classList.toggle("dark");
   settings.dark = document.body.classList.contains("dark");
   saveSettings();
+  renderTeam();
 });
 
 $("displayName").addEventListener("change", e => {
   settings.displayName = e.target.value.trim() || "David Denk";
   $("nameFilter").value = settings.displayName;
   saveSettings();
+  renderTeam();
 });
 
 $("defaultLeadTime").addEventListener("change", e => {
@@ -63,7 +69,8 @@ function formatTime(value) {
   return new Date(2000,0,1,h,m).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
 }
 
-function createAssignmentCard(a) {
+function createAssignmentCard(a, team = false) {
+  a = Schedule.metadata(a);
   const template = $("assignmentTemplate").content.cloneNode(true);
   const article = template.querySelector(".assignment-card");
   const date = new Date(`${a.date}T12:00:00`);
@@ -75,8 +82,12 @@ function createAssignmentCard(a) {
   pill.classList.add(`status-${a.status}`);
   template.querySelector(".time-line").textContent = `${formatDate(a.date)} • ${formatTime(a.startTime)}${a.endTime ? "–" + formatTime(a.endTime) : ""}`;
   template.querySelector(".location-line").textContent = [a.location, a.address].filter(Boolean).join(" • ") || "Location not entered";
-  template.querySelector(".notes-line").textContent = a.notes || "";
+  template.querySelector(".type-line").textContent = a.assignmentType;
+  template.querySelector(".photographers-line").textContent = a.photographers.length ? `Photographers: ${a.photographers.join(", ")}` : "Photographers not identified";
+  template.querySelector(".notes-line").textContent = [...new Set([a.notes, ...(a.sourceTexts || [])].filter(Boolean))].join("\n");
   template.querySelector(".details-btn").addEventListener("click", () => openDialog(a.id));
+
+  if (team) template.querySelector(".details-btn").remove();
 
   const directions = template.querySelector(".directions-btn");
   if (a.address) {
@@ -90,13 +101,13 @@ function createAssignmentCard(a) {
   return template;
 }
 
-function renderList(container, list) {
+function renderList(container, list, team = false) {
   container.innerHTML = "";
   if (!list.length) {
     container.innerHTML = '<div class="empty-state">No assignments found.</div>';
     return;
   }
-  list.forEach(a => container.appendChild(createAssignmentCard(a)));
+  list.forEach(a => container.appendChild(createAssignmentCard(a, team)));
 }
 
 function renderAll() {
@@ -110,6 +121,7 @@ function renderAll() {
 
   renderList($("dashboardList"), upcoming.slice(0,6));
   applyScheduleFilters();
+  renderTeam();
 
   const next = upcoming[0];
   $("nextAssignment").innerHTML = next
@@ -163,6 +175,7 @@ $("assignmentForm").addEventListener("submit", e => {
   e.preventDefault();
   const id = $("editId").value || crypto.randomUUID();
   const item = {
+    ...assignments.find(a => a.id === id),
     id,
     school: $("school").value.trim(),
     date: $("date").value,
@@ -188,82 +201,43 @@ $("deleteAssignmentBtn").addEventListener("click", () => {
   }
 });
 
-function normalizeYear(monthIndex) {
-  const now = new Date();
-  let year = now.getFullYear();
-  const candidate = new Date(year, monthIndex, 1);
-  if (candidate < new Date(now.getFullYear(), now.getMonth()-3, 1)) year += 1;
-  return year;
+// Legacy personal records remain under their original key and are never rewritten on load.
+// Team metadata is derived from old notes in memory; new imports use a separate key.
+function allTeamAssignments() {
+  return Schedule.merge(teamAssignments, assignments.map(Schedule.metadata));
 }
 
-function parseSchedule(text, name) {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const results = [];
-  let currentDate = null;
-  const dateRegex = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+([A-Za-z]{3,9})\s+(\d{1,2})(?:,\s*(\d{4}))?/i;
-
-  for (let i = 0; i < lines.length; i++) {
-    const dateMatch = lines[i].match(dateRegex);
-    if (dateMatch) {
-      const monthIndex = new Date(`${dateMatch[2]} 1, 2026`).getMonth();
-      const year = Number(dateMatch[4]) || normalizeYear(monthIndex);
-      currentDate = `${year}-${String(monthIndex+1).padStart(2,"0")}-${String(Number(dateMatch[3])).padStart(2,"0")}`;
-      continue;
-    }
-
-    if (!currentDate) continue;
-
-    let block = lines[i];
-    let j = i + 1;
-    while (j < lines.length && !dateRegex.test(lines[j])) {
-      if (/^\*\*C\*\*/.test(lines[j]) || /^C\s/.test(lines[j])) break;
-      block += " " + lines[j];
-      j++;
-    }
-
-    if (!block.toLowerCase().includes(name.toLowerCase())) continue;
-
-    const cleaned = block.replace(/\*\*/g,"").replace(/^C\s*/i,"").trim();
-    const school = cleaned.split(/\s+-\s+/)[0].trim() || "Imported Assignment";
-    const times = [...cleaned.matchAll(/(\d{1,2}:\d{2})\s*(am|pm)/ig)].map(m => to24(m[1],m[2]));
-    const addressMatch = cleaned.match(/Address:\s*([^)]+)/i);
-    const locationMatch = cleaned.match(/-\s*(Aud|Auditorium|gym foyer|gym|cafeteria|stage|stadium|field|Main Gym|Aux gym|playground|Outside & gym)/i);
-    const lower = cleaned.toLowerCase();
-    const status = lower.includes("pending") ? "tentative" :
-                   lower.includes("time tbd") || lower.includes("loc tbd") ? "tbd" :
-                   lower.includes("training") ? "training" : "confirmed";
-
-    results.push({
-      id: crypto.randomUUID(),
-      school,
-      date: currentDate,
-      startTime: times[0] || "",
-      endTime: times[1] || "",
-      status,
-      location: locationMatch ? locationMatch[1] : "",
-      address: addressMatch ? addressMatch[1].trim() : "",
-      notes: cleaned
-    });
-  }
-  return dedupe(results);
-}
-
-function to24(time, meridiem) {
-  let [h,m] = time.split(":").map(Number);
-  if (meridiem.toLowerCase() === "pm" && h !== 12) h += 12;
-  if (meridiem.toLowerCase() === "am" && h === 12) h = 0;
-  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
-}
-
-function dedupe(list) {
-  const seen = new Set();
-  return list.filter(a => {
-    const key = `${a.date}|${a.school}|${a.startTime}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+function renderTeam() {
+  const all = allTeamAssignments();
+  const filter = $("teamTypeFilter");
+  const previous = filter.value || "all";
+  filter.replaceChildren(new Option("All assignment types", "all"));
+  [...new Set(all.map(a => Schedule.metadata(a).assignmentType))].sort().forEach(type => filter.add(new Option(type, type)));
+  filter.value = [...filter.options].some(o => o.value === previous) ? previous : "all";
+  const people = Schedule.directory(all, settings.displayName, $("teamSearch").value, filter.value);
+  const directory = $("teamDirectory");
+  directory.replaceChildren();
+  people.forEach(person => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "secondary-btn coworker-btn";
+    button.textContent = `${person.name} · ${person.assignments.length} assignment${person.assignments.length === 1 ? "" : "s"}`;
+    button.setAttribute("aria-pressed", String(Schedule.key(selectedCoworker) === Schedule.key(person.name)));
+    button.addEventListener("click", () => { selectedCoworker = person.name; renderTeam(); });
+    directory.appendChild(button);
   });
+  if (!people.length) directory.textContent = "No coworkers match. Import a schedule with a photographer roster to get started.";
+  const selected = people.find(p => Schedule.key(p.name) === Schedule.key(selectedCoworker));
+  $("teamAssignmentsHeading").textContent = selected ? `${selected.name} — Assignments` : "Select a coworker";
+  $("teamAssignments").replaceChildren();
+  if (selected) renderList($("teamAssignments"), selected.assignments.sort((a,b) => assignmentDateTime(a)-assignmentDateTime(b)), true);
+  const unresolved = teamAssignments.filter(a => !Schedule.metadata(a).photographers.length);
+  $("teamUnresolvedSummary").textContent = `${unresolved.length} assignment${unresolved.length === 1 ? "" : "s"} without identified photographers`;
+  renderList($("teamUnresolved"), unresolved, true);
 }
+
+$("teamSearch").addEventListener("input", renderTeam);
+$("teamTypeFilter").addEventListener("change", renderTeam);
 
 $("importBtn").addEventListener("click", () => {
   const text = $("scheduleText").value.trim();
@@ -272,10 +246,23 @@ $("importBtn").addEventListener("click", () => {
     $("importMessage").textContent = "Paste a schedule and enter your name first.";
     return;
   }
-  const parsed = parseSchedule(text, name);
-  assignments = dedupe([...assignments, ...parsed]);
-  saveAssignments();
-  $("importMessage").textContent = `Imported ${parsed.length} assignment${parsed.length === 1 ? "" : "s"} containing “${name}.”`;
+  const parsed = Schedule.parse(text);
+  const personal = parsed.filter(a => a.photographers.some(n => Schedule.key(n) === Schedule.key(name)));
+  const nextTeam = Schedule.merge(teamAssignments, parsed);
+  const nextPersonal = Schedule.merge(assignments, personal);
+  // Write the independent Team store first; never replace personal data with coworker rows.
+  try {
+    localStorage.setItem(TEAM_KEY, JSON.stringify(nextTeam));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextPersonal));
+  } catch {
+    $("importMessage").textContent = "Could not save the import. Storage may be full; export a backup and retry.";
+    return;
+  }
+  teamAssignments = nextTeam;
+  assignments = nextPersonal;
+  renderAll();
+  const unresolved = parsed.filter(a => !a.photographers.length).length;
+  $("importMessage").textContent = `Processed ${parsed.length} assignments: ${personal.length} for ${name}. Team updated; ${unresolved} without identified photographers (review in Team).`;
 });
 
 $("sampleBtn").addEventListener("click", () => {
@@ -320,7 +307,7 @@ function downloadBlob(name, content, type) {
 }
 
 $("exportBtn").addEventListener("click", () => {
-  downloadBlob("denk-hub-backup.json", JSON.stringify({assignments,settings}, null, 2), "application/json");
+  downloadBlob("denk-hub-backup.json", JSON.stringify({schemaVersion:2,assignments,teamAssignments,settings}, null, 2), "application/json");
 });
 
 $("backupInput").addEventListener("change", async e => {
@@ -328,7 +315,12 @@ $("backupInput").addEventListener("change", async e => {
   if (!file) return;
   try {
     const data = JSON.parse(await file.text());
-    assignments = Array.isArray(data.assignments) ? data.assignments : [];
+    if (!Array.isArray(data.assignments) || (data.teamAssignments !== undefined && !Array.isArray(data.teamAssignments))) throw new Error("Invalid backup");
+    const mergedTeam = Schedule.merge(teamAssignments, data.teamAssignments || []);
+    const mergedPersonal = Schedule.merge(assignments, data.assignments);
+    localStorage.setItem(TEAM_KEY, JSON.stringify(mergedTeam));
+    teamAssignments = mergedTeam;
+    assignments = mergedPersonal;
     settings = data.settings || settings;
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     saveAssignments();
@@ -340,6 +332,8 @@ $("backupInput").addEventListener("change", async e => {
 
 $("clearBtn").addEventListener("click", () => {
   if (confirm("Clear every saved assignment?")) {
+    localStorage.setItem(TEAM_KEY, "[]");
+    teamAssignments = [];
     assignments = [];
     saveAssignments();
   }

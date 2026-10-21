@@ -119,7 +119,7 @@
     <form method="dialog" id="assignmentForm">
       <div class="dialog-header">
         <h2 id="dialogTitle">Add Assignment</h2>
-        <button class="icon-btn" value="cancel" aria-label="Close">✕</button>
+        <button id="closeAssignmentBtn" class="icon-btn" type="button" aria-label="Close">✕</button>
       </div>
 
       <input id="editId" type="hidden" />
@@ -161,7 +161,8 @@
       <textarea id="notes" rows="4"></textarea>
 
       <div class="button-row">
-        <button id="saveAssignmentBtn" class="primary-btn" value="default">Save Assignment</button>
+        <button id="saveAssignmentBtn" class="primary-btn" type="submit" value="default">Save Assignment</button>
+        <button id="cancelAssignmentBtn" class="secondary-btn" type="button">Cancel</button>
         <button id="deleteAssignmentBtn" class="danger-btn" type="button">Delete</button>
       </div>
     </form>

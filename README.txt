@@ -3,7 +3,7 @@ PhotoOps — VERSION 1
 Included:
 - Mobile-friendly dashboard
 - Paste and process a company schedule
-- Automatic filtering for "David Denk"
+- Filtering using your configured name and aliases
 - Confirmed, Training, Tentative, and TBD labels
 - Search and status filters
 - Manual add/edit/delete
@@ -23,3 +23,6 @@ such as GitHub Pages, Netlify, or your own website, then open its address in Saf
 Share > Add to Home Screen.
 
 Your schedule stays in that browser's local storage unless you export a backup.
+
+PhotoOps 2.1 development: see SYNCHRONIZATION.md for safe repeated imports,
+matching, review modes, local backups, restoration, historical views, and tests.

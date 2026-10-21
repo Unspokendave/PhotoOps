@@ -1,16 +1,24 @@
 const STORAGE_KEY = "PhotoOpsAssignmentsV1";
+const Sync = PhotoOpsSync;
+const BACKUP_PREFIX = "PhotoOpsSyncBackupV21:";
+let pendingSync = null;
+let previewSource = null;
 const SETTINGS_KEY = "PhotoOpsSettingsV1";
 
-let assignments = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{"displayName":"David Denk","leadTime":45,"dark":false}');
+let loadedRaw = localStorage.getItem(STORAGE_KEY);
+let assignments = JSON.parse(loadedRaw || "[]");
+let settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{"displayName":"","aliases":[],"importMode":"mine","leadTime":45,"dark":false}');
 
 const $ = (id) => document.getElementById(id);
 const tabs = document.querySelectorAll(".tab");
 const panels = document.querySelectorAll(".panel");
 
 if (settings.dark) document.body.classList.add("dark");
-$("displayName").value = settings.displayName || "David Denk";
-$("nameFilter").value = settings.displayName || "David Denk";
+$("displayName").value = settings.displayName || "";
+$("nameFilter").value = settings.displayName || "";
+$("nameAliases").value = (settings.aliases || []).join("\n");
+$("importMode").value = settings.importMode || "mine";
+$("viewDate").value = new Date().toLocaleDateString("en-CA");
 $("defaultLeadTime").value = String(settings.leadTime || 45);
 
 tabs.forEach(tab => tab.addEventListener("click", () => {
@@ -27,7 +35,8 @@ $("themeBtn").addEventListener("click", () => {
 });
 
 $("displayName").addEventListener("change", e => {
-  settings.displayName = e.target.value.trim() || "David Denk";
+  settings.displayName = e.target.value.trim();
+  cancelPreview();
   $("nameFilter").value = settings.displayName;
   saveSettings();
 });
@@ -41,10 +50,44 @@ function saveSettings() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
-function saveAssignments() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(assignments));
-  renderAll();
+function saveAssignments(next) {
+  if(localStorage.getItem(STORAGE_KEY) !== loadedRaw) throw new Error("Another tab changed assignments. Reload before saving to avoid overwriting its changes.");
+  const raw=JSON.stringify(next);
+  localStorage.setItem(STORAGE_KEY,raw);
+  loadedRaw=raw; assignments=next; renderAll();
 }
+
+// A single localStorage replacement commits the assignment array atomically.
+// Keep a durable exact pre-write snapshot; quota errors stop the write.
+async function commitBulk(next, expected) {
+  const commit = () => {
+    if (localStorage.getItem(STORAGE_KEY) !== expected) throw new Error("Saved assignments changed. Preview the schedule again before applying it.");
+    const backup = {createdAt:new Date().toISOString(),assignmentsRaw:expected,settingsRaw:localStorage.getItem(SETTINGS_KEY)};
+    localStorage.setItem(BACKUP_PREFIX + backup.createdAt + ":" + crypto.randomUUID(), JSON.stringify(backup));
+    if (localStorage.getItem(STORAGE_KEY) !== expected) throw new Error("Another tab changed assignments. Preview again.");
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    assignments = next; loadedRaw=localStorage.getItem(STORAGE_KEY);
+    renderAll();
+  };
+  if (navigator.locks) await navigator.locks.request("PhotoOpsAssignments", commit);
+  else commit();
+}
+
+$("nameAliases").addEventListener("change", () => { settings.aliases = $("nameAliases").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean); saveSettings(); cancelPreview(); });
+$("importMode").addEventListener("change", () => { settings.importMode = $("importMode").value; saveSettings(); cancelPreview(); });
+$("scheduleFile").addEventListener("change", async e => {
+  const file=e.target.files[0]; if (!file) return;
+  try { $("scheduleText").value=await file.text(); cancelPreview(); }
+  catch { $("importMessage").textContent="The schedule file could not be read."; }
+});
+$("scheduleText").addEventListener("input", cancelPreview);
+$("nameFilter").addEventListener("input", cancelPreview);
+$("syncBackupBtn").addEventListener("click", () => {
+  const keys=Object.keys(localStorage).filter(k=>k.startsWith(BACKUP_PREFIX)).sort();
+  if(!keys.length) { alert("No safety backups yet. One is saved before synchronization or backup restoration."); return; }
+  const backup=JSON.parse(localStorage.getItem(keys.at(-1)));
+  downloadBlob("photoops-safety-backup.json",JSON.stringify({assignments:JSON.parse(backup.assignmentsRaw || "[]"),settings:JSON.parse(backup.settingsRaw || "{}"),createdAt:backup.createdAt},null,2),"application/json");
+});
 
 function assignmentDateTime(a) {
   const time = a.startTime || "23:59";
@@ -71,10 +114,12 @@ function createAssignmentCard(a) {
   template.querySelector(".day").textContent = date.getDate();
   template.querySelector("h3").textContent = a.school;
   const pill = template.querySelector(".status-pill");
-  pill.textContent = a.status;
-  pill.classList.add(`status-${a.status}`);
+  const status = ["confirmed","training","tentative","tbd"].includes(a.status) ? a.status : "tbd";
+  pill.textContent = a.status || status;
+  pill.classList.add(`status-${status}`);
   template.querySelector(".time-line").textContent = `${formatDate(a.date)} • ${formatTime(a.startTime)}${a.endTime ? "–" + formatTime(a.endTime) : ""}`;
   template.querySelector(".location-line").textContent = [a.location, a.address].filter(Boolean).join(" • ") || "Location not entered";
+  template.querySelector(".sync-line").textContent = [a.arrivalTime ? `Arrival ${formatTime(a.arrivalTime)}` : "", a.assignmentType, (a.photographers || []).join(", "), a.sync?.lastImportedAt ? `Imported ${new Date(a.sync.lastImportedAt).toLocaleString()}` : ""].filter(Boolean).join(" • ");
   template.querySelector(".notes-line").textContent = a.notes || "";
   template.querySelector(".details-btn").addEventListener("click", () => openDialog(a.id));
 
@@ -127,11 +172,15 @@ function applyScheduleFilters() {
   const term = $("searchInput").value.toLowerCase().trim();
   const status = $("statusFilter").value;
   const list = [...assignments]
+    .filter(a => Sync.inView(a, $("scheduleView").value, $("viewDate").value))
     .filter(a => status === "all" || a.status === status)
-    .filter(a => [a.school,a.location,a.address,a.notes].join(" ").toLowerCase().includes(term))
+    .filter(a => [a.school,a.location,a.address,a.notes,a.scheduleNotes,a.scheduleDetails,a.assignmentType,...(a.photographers || [])].join(" ").toLowerCase().includes(term))
     .sort((a,b) => assignmentDateTime(a) - assignmentDateTime(b));
   renderList($("scheduleList"), list);
 }
+
+$("scheduleView").addEventListener("change", applyScheduleFilters);
+$("viewDate").addEventListener("change", applyScheduleFilters);
 
 $("searchInput").addEventListener("input", applyScheduleFilters);
 $("statusFilter").addEventListener("change", applyScheduleFilters);
@@ -148,6 +197,27 @@ function openDialog(id=null) {
   $("location").value = a?.location || "";
   $("address").value = a?.address || "";
   $("notes").value = a?.notes || "";
+  $("arrivalTime").value = a?.arrivalTime || "";
+  $("assignmentType").value = a?.assignmentType || "";
+  $("photographers").value = (a?.photographers || []).join(", ");
+  $("contacts").value = typeof a?.contacts === "string" ? a.contacts : (a?.contacts == null ? "" : JSON.stringify(a.contacts));
+  $("importedInfo").textContent = [a?.scheduleNotes,a?.scheduleDetails].filter(Boolean).join("\n\n") || "No imported schedule information.";
+  $("assignmentHistory").replaceChildren();
+  (a?.history || []).forEach((event,index) => {
+    const button=document.createElement("button"); button.type="button"; button.className="secondary-btn";
+    button.textContent=`Restore values before ${event.kind} — ${new Date(event.at).toLocaleString()}`;
+    button.addEventListener("click", async () => {
+      if(!confirm("Restore this assignment's previous values? A safety backup will be saved first.")) return;
+      const expected=localStorage.getItem(STORAGE_KEY);
+      try {
+        if(JSON.stringify(JSON.parse(expected || "[]")) !== JSON.stringify(assignments)) throw new Error("Data changed in another tab. Reload before restoring.");
+        const restored=Sync.restore(assignments.find(x=>x.id===id),index);
+        await commitBulk(assignments.map(x=>x.id===id?restored:x),expected);
+        $("assignmentDialog").close(); cancelPreview();
+      } catch(error) { alert(`Restore stopped: ${error.message}`); }
+    });
+    $("assignmentHistory").appendChild(button);
+  });
   $("deleteAssignmentBtn").style.display = a ? "inline-block" : "none";
   $("assignmentDialog").showModal();
 }
@@ -162,8 +232,14 @@ $("addManualBtn").addEventListener("click", () => openDialog());
 $("assignmentForm").addEventListener("submit", e => {
   e.preventDefault();
   const id = $("editId").value || crypto.randomUUID();
+  const previous = assignments.find(a => a.id === id);
   const item = {
+    ...previous,
     id,
+    arrivalTime: $("arrivalTime").value,
+    assignmentType: $("assignmentType").value.trim(),
+    photographers: $("photographers").value.split(",").map(s=>s.trim()).filter(Boolean),
+    contacts: previous && $("contacts").value === (typeof previous.contacts === "string" ? previous.contacts : (previous.contacts == null ? "" : JSON.stringify(previous.contacts))) ? previous.contacts : $("contacts").value,
     school: $("school").value.trim(),
     date: $("date").value,
     startTime: $("startTime").value,
@@ -173,118 +249,118 @@ $("assignmentForm").addEventListener("submit", e => {
     address: $("address").value.trim(),
     notes: $("notes").value.trim()
   };
+  item.manualFields = [...new Set([...(previous?.manualFields || []), ...Sync.fields.filter(f => previous && !Sync.equal(previous[f], item[f]))])];
   const index = assignments.findIndex(a => a.id === id);
-  if (index >= 0) assignments[index] = item; else assignments.push(item);
-  saveAssignments();
-  $("assignmentDialog").close();
+  const next=assignments.slice();
+  if (index >= 0) next[index] = item; else next.push(item);
+  try { saveAssignments(next); $("assignmentDialog").close(); cancelPreview(); }
+  catch(error) { alert(`Save stopped: ${error.message}`); }
 });
 
 $("deleteAssignmentBtn").addEventListener("click", () => {
   const id = $("editId").value;
   if (id && confirm("Delete this assignment?")) {
-    assignments = assignments.filter(a => a.id !== id);
-    saveAssignments();
-    $("assignmentDialog").close();
+    try { saveAssignments(assignments.filter(a => a.id !== id)); $("assignmentDialog").close(); cancelPreview(); }
+    catch(error) { alert(`Delete stopped: ${error.message}`); }
   }
 });
 
-function normalizeYear(monthIndex) {
-  const now = new Date();
-  let year = now.getFullYear();
-  const candidate = new Date(year, monthIndex, 1);
-  if (candidate < new Date(now.getFullYear(), now.getMonth()-3, 1)) year += 1;
-  return year;
+function cancelPreview() { pendingSync=null; previewSource=null; $("syncPreview").hidden=true; }
+
+function updateSyncCounts() {
+  const entries=pendingSync.entries;
+  $("syncCounts").textContent=["new","updated","unchanged","ambiguous"].map(status=>`${entries.filter(e=>e.status===status).length} ${status}`).join(" · ") + ` · ${pendingSync.duplicates} identical uploaded rows ignored`;
 }
 
-function parseSchedule(text, name) {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const results = [];
-  let currentDate = null;
-  const dateRegex = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s+([A-Za-z]{3,9})\s+(\d{1,2})(?:,\s*(\d{4}))?/i;
-
-  for (let i = 0; i < lines.length; i++) {
-    const dateMatch = lines[i].match(dateRegex);
-    if (dateMatch) {
-      const monthIndex = new Date(`${dateMatch[2]} 1, 2026`).getMonth();
-      const year = Number(dateMatch[4]) || normalizeYear(monthIndex);
-      currentDate = `${year}-${String(monthIndex+1).padStart(2,"0")}-${String(Number(dateMatch[3])).padStart(2,"0")}`;
-      continue;
+const fieldLabel = field => ({arrivalTime:"Arrival time",startTime:"Start time",endTime:"End time",assignmentType:"Assignment type",scheduleNotes:"Imported schedule information"}[field] || field);
+const showValue = value => Array.isArray(value) ? value.join(", ") : String(value || "(not set)");
+function renderSyncPreview() {
+  $("syncRows").replaceChildren(); updateSyncCounts();
+  pendingSync.entries.forEach((entry,index) => {
+    const article=document.createElement("article"); article.className="sync-row";
+    const label=document.createElement("label");
+    const selected=document.createElement("input"); selected.type="checkbox"; selected.checked=entry.selected;
+    selected.disabled=entry.status==="unchanged";
+    selected.addEventListener("change",()=>{entry.selected=selected.checked;});
+    label.append(selected,document.createTextNode(`${entry.status.toUpperCase()}: ${entry.incoming.school} — ${entry.incoming.date}`));
+    article.append(label);
+    const identity=document.createElement("p");
+    const target=assignments.find(a=>a.id===entry.targetId);
+    identity.textContent=[entry.incoming.sourceId ? `Source ID: ${entry.incoming.sourceId}` : "No stable source ID", target ? `Matched saved assignment: ${target.school} — ${target.date} ${target.startTime || ""}` : ""].filter(Boolean).join(" • ");
+    article.append(identity);
+    const incoming=document.createElement("p"); incoming.textContent=Sync.fields.filter(f=>entry.incoming[f]).map(f=>`${fieldLabel(f)}: ${showValue(entry.incoming[f])}`).join(" • ");article.append(incoming);
+    if(entry.status==="ambiguous" || $("importMode").value==="review") {
+      const actionLabel=document.createElement("label");actionLabel.textContent="Import decision";
+      const decision=document.createElement("select"); decision.setAttribute("aria-label",`Import decision ${index+1}`);
+      decision.add(new Option("Skip this row","skip")); decision.add(new Option("Add as a separate new assignment","new"));
+      for(const id of entry.candidates) {
+        const old=assignments.find(a=>a.id===id); decision.add(new Option(`Update ${old.school} — ${old.date} ${old.startTime || ""}`,id));
+      }
+      decision.value=entry.action==="update"?entry.targetId:entry.action;
+      decision.disabled=entry.status==="unchanged";
+      decision.addEventListener("change",()=>{
+        entry.action=["new","skip"].includes(decision.value)?decision.value:"update";
+        entry.targetId=entry.action==="update"?decision.value:undefined;
+        entry.overrides=[];
+        entry.diffs=entry.targetId?Sync.changes(assignments.find(a=>a.id===entry.targetId),entry.incoming):[];
+        entry.selected=entry.action!=="skip";renderSyncPreview();
+      });
+      actionLabel.append(decision);article.append(actionLabel);
+      const reason=document.createElement("p");reason.textContent=entry.reason;article.append(reason);
     }
-
-    if (!currentDate) continue;
-
-    let block = lines[i];
-    let j = i + 1;
-    while (j < lines.length && !dateRegex.test(lines[j])) {
-      if (/^\*\*C\*\*/.test(lines[j]) || /^C\s/.test(lines[j])) break;
-      block += " " + lines[j];
-      j++;
+    for(const diff of entry.diffs) {
+      const detail=document.createElement("p");
+      detail.textContent=`${fieldLabel(diff.field)}: ${showValue(diff.before)} → ${showValue(diff.incoming)}${diff.preserved?" (manual value kept)":""}`;
+      article.append(detail);
+      if(diff.preserved || entry.overrides.includes(diff.field)) {
+        const overrideLabel=document.createElement("label"); const override=document.createElement("input");override.type="checkbox";override.checked=entry.overrides.includes(diff.field);
+        override.addEventListener("change",()=>{
+          entry.overrides=override.checked?[...entry.overrides,diff.field]:entry.overrides.filter(f=>f!==diff.field);
+          entry.diffs=Sync.changes(assignments.find(a=>a.id===entry.targetId),entry.incoming,entry.overrides);
+          renderSyncPreview();
+        });
+        overrideLabel.append(override,document.createTextNode(`Use imported ${fieldLabel(diff.field)} instead of my manual value`));article.append(overrideLabel);
+      }
     }
-
-    if (!block.toLowerCase().includes(name.toLowerCase())) continue;
-
-    const cleaned = block.replace(/\*\*/g,"").replace(/^C\s*/i,"").trim();
-    const school = cleaned.split(/\s+-\s+/)[0].trim() || "Imported Assignment";
-    const times = [...cleaned.matchAll(/(\d{1,2}:\d{2})\s*(am|pm)/ig)].map(m => to24(m[1],m[2]));
-    const addressMatch = cleaned.match(/Address:\s*([^)]+)/i);
-    const locationMatch = cleaned.match(/-\s*(Aud|Auditorium|gym foyer|gym|cafeteria|stage|stadium|field|Main Gym|Aux gym|playground|Outside & gym)/i);
-    const lower = cleaned.toLowerCase();
-    const status = lower.includes("pending") ? "tentative" :
-                   lower.includes("time tbd") || lower.includes("loc tbd") ? "tbd" :
-                   lower.includes("training") ? "training" : "confirmed";
-
-    results.push({
-      id: crypto.randomUUID(),
-      school,
-      date: currentDate,
-      startTime: times[0] || "",
-      endTime: times[1] || "",
-      status,
-      location: locationMatch ? locationMatch[1] : "",
-      address: addressMatch ? addressMatch[1].trim() : "",
-      notes: cleaned
-    });
-  }
-  return dedupe(results);
-}
-
-function to24(time, meridiem) {
-  let [h,m] = time.split(":").map(Number);
-  if (meridiem.toLowerCase() === "pm" && h !== 12) h += 12;
-  if (meridiem.toLowerCase() === "am" && h === 12) h = 0;
-  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
-}
-
-function dedupe(list) {
-  const seen = new Set();
-  return list.filter(a => {
-    const key = `${a.date}|${a.school}|${a.startTime}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+    $("syncRows").append(article);
   });
+  $("syncPreview").hidden=false;
 }
 
-$("importBtn").addEventListener("click", () => {
-  const text = $("scheduleText").value.trim();
-  const name = $("nameFilter").value.trim();
-  if (!text || !name) {
-    $("importMessage").textContent = "Paste a schedule and enter your name first.";
-    return;
-  }
-  const parsed = parseSchedule(text, name);
-  assignments = dedupe([...assignments, ...parsed]);
-  saveAssignments();
-  $("importMessage").textContent = `Imported ${parsed.length} assignment${parsed.length === 1 ? "" : "s"} containing “${name}.”`;
+$("importBtn").addEventListener("click",()=>{
+  cancelPreview();
+  try {
+    const name=$("nameFilter").value.trim();
+    if($("importMode").value==="mine" && !name && !(settings.aliases || []).length) throw new Error("Configure your name or aliases, or choose All Assignments / Review Each Import.");
+    const parsed=Sync.parse($("scheduleText").value);
+    previewSource=localStorage.getItem(STORAGE_KEY);
+    const saved=JSON.parse(previewSource || "[]");
+    assignments=saved; loadedRaw=previewSource;
+    pendingSync=Sync.plan(saved,parsed.rows,{name,aliases:settings.aliases || [],mode:$("importMode").value});
+    renderSyncPreview();
+    $("importMessage").textContent=parsed.warnings.join("\n") || `${parsed.rows.length} valid rows parsed. No changes saved yet.`;
+  } catch(error) { $("importMessage").textContent=`Preview stopped: ${error.message}`; }
+});
+$("cancelSyncBtn").addEventListener("click",()=>{cancelPreview();$("importMessage").textContent="Preview canceled. Saved assignments are unchanged.";});
+$("confirmSyncBtn").addEventListener("click",async()=>{
+  if(!pendingSync) return;
+  const button=$("confirmSyncBtn");button.disabled=true;
+  try {
+    if(pendingSync.entries.some(e=>e.selected && e.action==="skip")) throw new Error("Choose a decision for each selected ambiguous row, or uncheck it.");
+    const entries=pendingSync.entries.filter(e=>e.selected && e.action!=="skip");
+    if(!entries.length) {$("importMessage").textContent="No changes selected.";return;}
+    const next=Sync.apply(assignments,entries);
+    await commitBulk(next,previewSource);
+    cancelPreview(); $("importMessage").textContent="Synchronization complete. Previous data is backed up locally; missing assignments were retained.";
+  } catch(error) {$("importMessage").textContent=`Synchronization stopped; no assignments were written: ${error.message}`;}
+  finally {button.disabled=false;}
 });
 
-$("sampleBtn").addEventListener("click", () => {
-  $("scheduleText").value = `Mon, Aug 3
-**C** Hickory HS SR27 MU - 9:00am last appt@1:20pm- (Gray bkgd) - gym foyer - Tripp, Angel, Connor, Ahmed, Ramsay, Monica, Ben, David Denk (training)
-Tue, Aug 4
-**C** Jamestown HS SR27 MU -9:00am last appt@1:20pm - cafeteria - Tripp, Ahmed, Monica, Ramsay, Stacy, David Denk (training)
-Thu, Aug 20
-Woodside HS Fall Sportsmates - 4:00pm - pending approval - Tripp, Ahmed, Ramsay, Monica, David Denk`;
+$("sampleBtn").addEventListener("click",()=>{
+  const name=$("nameFilter").value.trim() || (settings.aliases || [])[0] || "Sample Photographer";
+  $("scheduleText").value=`Mon, Nov 2, ${new Date().getFullYear()}
+[ID: sample-1] Example HS Faculty Individuals - arrival 8:30am - start 9:00am - end 1:00pm - gym - Photographers: ${name}`;
+  cancelPreview();
 });
 
 function downloadICS(a) {
@@ -293,13 +369,13 @@ function downloadICS(a) {
   const dtStart = `${a.date.replaceAll("-","")}T${start.replace(":","")}00`;
   const dtEnd = `${a.date.replaceAll("-","")}T${end.replace(":","")}00`;
   const body = [
-    "BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Denk Hub//EN","BEGIN:VEVENT",
-    `UID:${a.id}@denk-hub`,
+    "BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//PhotoOps//EN","BEGIN:VEVENT",
+    `UID:${a.id}@photoops`,
     `DTSTART:${dtStart}`,
     `DTEND:${dtEnd}`,
-    `SUMMARY:${icsEscape(a.school)}`,
+    `SUMMARY:${icsEscape([a.school,a.assignmentType].filter(Boolean).join(" — "))}`,
     `LOCATION:${icsEscape([a.location,a.address].filter(Boolean).join(", "))}`,
-    `DESCRIPTION:${icsEscape(a.notes || "")}`,
+    `DESCRIPTION:${icsEscape([a.arrivalTime ? "Arrival: " + a.arrivalTime : "", a.notes, a.scheduleNotes].filter(Boolean).join("\n"))}`,
     "END:VEVENT","END:VCALENDAR"
   ].join("\r\n");
   downloadBlob(`${a.school.replace(/[^a-z0-9]+/gi,"-")}.ics`, body, "text/calendar");
@@ -320,7 +396,7 @@ function downloadBlob(name, content, type) {
 }
 
 $("exportBtn").addEventListener("click", () => {
-  downloadBlob("denk-hub-backup.json", JSON.stringify({assignments,settings}, null, 2), "application/json");
+  downloadBlob("photoops-backup.json", JSON.stringify({schemaVersion:21,assignments,settings}, null, 2), "application/json");
 });
 
 $("backupInput").addEventListener("change", async e => {
@@ -328,20 +404,23 @@ $("backupInput").addEventListener("change", async e => {
   if (!file) return;
   try {
     const data = JSON.parse(await file.text());
-    assignments = Array.isArray(data.assignments) ? data.assignments : [];
-    settings = data.settings || settings;
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    saveAssignments();
-    alert("Backup imported.");
-  } catch {
-    alert("That backup file could not be read.");
+    if(!Array.isArray(data.assignments) || data.assignments.some(a=>!a || typeof a.id!=="string" || !Sync.validDate(a.date) || typeof a.school!=="string" || !a.school.trim())) throw new Error("Invalid backup");
+    if(!confirm("Merge this backup into your assignments? Existing records are kept, and a safety backup is saved first.")) return;
+    const expected=localStorage.getItem(STORAGE_KEY);
+    const current=JSON.parse(expected || "[]");
+    // Preserve current records on ID conflicts; restoration of an individual version is explicit.
+    const merged=[...current,...data.assignments.filter(a=>!current.some(old=>old.id===a.id))];
+    await commitBulk(merged,expected);
+    cancelPreview();
+    alert("Backup merged. Existing assignments and settings were preserved.");
+  } catch(error) {
+    alert(`Backup import stopped: ${error.message}`);
   }
 });
 
 $("clearBtn").addEventListener("click", () => {
   if (confirm("Clear every saved assignment?")) {
-    assignments = [];
-    saveAssignments();
+    try { saveAssignments([]); cancelPreview(); } catch(error) { alert(`Clear stopped: ${error.message}`); }
   }
 });
 

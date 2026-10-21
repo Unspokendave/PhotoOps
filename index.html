@@ -67,24 +67,39 @@
           <option value="tbd">TBD</option>
         </select>
       </div>
+      <div class="toolbar">
+        <select id="scheduleView" aria-label="Schedule view"><option value="all">All dates (including history)</option><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option></select>
+        <input id="viewDate" type="date" aria-label="Schedule view date" />
+      </div>
       <div id="scheduleList" class="assignment-list"></div>
     </section>
 
     <section id="import" class="panel">
       <article class="form-card">
         <h2>Import Work Schedule</h2>
-        <p>Paste the full company schedule. Denk Hub will keep entries containing your name.</p>
+        <p>Paste or upload a schedule, preview proposed changes, then confirm. Missing assignments are never deleted. Schedule dates without a year use the current schedule year; include explicit years for historical imports.</p>
 
         <label for="nameFilter">Name to find</label>
-        <input id="nameFilter" value="David Denk" />
+        <input id="nameFilter" placeholder="Your configured name" />
 
+        <label for="importMode">Import mode</label>
+        <select id="importMode"><option value="mine">My Assignments</option><option value="all">All Assignments</option><option value="review">Review Each Import</option></select>
+        <label for="scheduleFile">Upload schedule (.txt or .json)</label>
+        <input id="scheduleFile" type="file" accept=".txt,.json,text/plain,application/json" />
         <label for="scheduleText">Paste schedule</label>
         <textarea id="scheduleText" rows="16" placeholder="Paste the work schedule here..."></textarea>
 
         <div class="button-row">
-          <button id="importBtn" class="primary-btn">Process Schedule</button>
+          <button id="importBtn" class="primary-btn">Preview Schedule Sync</button>
           <button id="sampleBtn" class="secondary-btn">Load Sample</button>
         </div>
+        <section id="syncPreview" hidden aria-label="Schedule Sync Preview">
+          <h3>Schedule Sync Preview</h3>
+          <p id="syncCounts" aria-live="polite"></p>
+          <p>Uncheck rows to skip. Uncertain matches require an explicit decision. Protected manual fields stay unchanged unless you choose their imported values.</p>
+          <div id="syncRows"></div>
+          <div class="button-row"><button id="confirmSyncBtn" class="primary-btn" type="button">Confirm synchronization</button><button id="cancelSyncBtn" class="secondary-btn" type="button">Cancel preview</button></div>
+        </section>
         <p id="importMessage" class="message" aria-live="polite"></p>
       </article>
     </section>
@@ -93,8 +108,11 @@
       <article class="form-card">
         <h2>Settings & Data</h2>
         <label for="displayName">Your name</label>
-        <input id="displayName" value="David Denk" />
+        <input id="displayName" placeholder="Your configured name" />
 
+        <label for="nameAliases">Name aliases (one per line)</label>
+        <textarea id="nameAliases" rows="3" placeholder="Alternate names used on schedules"></textarea>
+        <p>Your configured name, aliases, and import mode are stored only in this browser. My Assignments imports recognized roster matches and updates existing matched work even if its photographer changes.</p>
         <label for="defaultLeadTime">Reminder lead time</label>
         <select id="defaultLeadTime">
           <option value="30">30 minutes</option>
@@ -109,6 +127,7 @@
             Import Backup
             <input id="backupInput" type="file" accept=".json" hidden />
           </label>
+          <button id="syncBackupBtn" class="secondary-btn" type="button">Export latest safety backup</button>
           <button id="clearBtn" class="danger-btn">Clear All Data</button>
         </div>
       </article>
@@ -133,6 +152,10 @@
           <input id="date" type="date" required />
         </div>
         <div>
+          <label for="arrivalTime">Arrival</label>
+          <input id="arrivalTime" type="time" />
+        </div>
+        <div>
           <label for="startTime">Start</label>
           <input id="startTime" type="time" />
         </div>
@@ -151,6 +174,12 @@
         </div>
       </div>
 
+      <label for="assignmentType">Assignment type</label>
+      <input id="assignmentType" />
+      <label for="photographers">Photographers (comma separated)</label>
+      <input id="photographers" />
+      <label for="contacts">Contacts</label>
+      <textarea id="contacts" rows="2"></textarea>
       <label for="location">Location inside building</label>
       <input id="location" placeholder="Gym, auditorium, cafeteria..." />
 
@@ -160,6 +189,7 @@
       <label for="notes">Notes</label>
       <textarea id="notes" rows="4"></textarea>
 
+      <details><summary>Imported schedule information & change history</summary><p id="importedInfo"></p><div id="assignmentHistory"></div></details>
       <div class="button-row">
         <button id="saveAssignmentBtn" class="primary-btn" type="submit" value="default">Save Assignment</button>
         <button id="cancelAssignmentBtn" class="secondary-btn" type="button">Cancel</button>
@@ -181,6 +211,7 @@
         </div>
         <p class="time-line"></p>
         <p class="location-line"></p>
+        <p class="sync-line"></p>
         <p class="notes-line"></p>
         <div class="card-actions">
           <button class="small-btn details-btn">Details</button>
@@ -191,6 +222,7 @@
     </article>
   </template>
 
+  <script src="sync.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

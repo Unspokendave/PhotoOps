@@ -29,3 +29,6 @@ matching, review modes, local backups, restoration, historical views, and tests.
 
 Completed scheduling features: see FEATURE-AUDIT.md for the calendar layouts,
 School Directory, advanced filters, implementation files and validation scope.
+
+Simple importing: see IMPORTING.md for one-click importing, name recognition,
+optional attention items, and supported/unsupported schedule formats.

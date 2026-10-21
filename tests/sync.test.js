@@ -74,7 +74,7 @@ test('name, aliases, all and review modes respect each installation',()=>{
  assert.equal(S.plan([],[base],{mode:'all'}).entries[0].selected,true);
  assert.equal(S.plan([],[base],{mode:'review'}).entries[0].selected,false);
  const old=first({...base,sourceId:'job'});
- assert.equal(S.plan([old],[{...base,sourceId:'job',photographers:['Replacement']}],{mode:'mine',name:'Alex Smith'}).entries[0].status,'updated');
+ assert.equal(S.plan([old],[{...base,sourceId:'job',photographers:['Replacement']}],{mode:'mine',name:'Alex Smith'}).entries.length,0);
 });
 test('past assignments appear in day, week, month and all views',()=>{
  const a={date:'2000-01-02'};assert(S.inView(a,'day','2000-01-02'));assert(S.inView(a,'week','2000-01-01'));assert(S.inView(a,'month','2000-01-31'));assert(S.inView(a,'all','2026-01-01'));assert(!S.inView(a,'day','2000-01-03'));

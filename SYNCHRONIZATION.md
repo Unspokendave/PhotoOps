@@ -4,17 +4,23 @@ This branch builds on the approved personal PhotoOps version and its Close,
 Cancel, and native Escape dialog fix. It contains no Team directory or Team
 storage access. No deployment configuration or production branch is changed.
 
-## Import and review
+## Current one-click importing
+
+See IMPORTING.md for the current workflow, supported layouts, reproduced failures,
+and validation. Import & Update Schedule now applies confident changes immediately;
+only uncertain items are retained in collapsed optional attention details.
+
+## Import preferences
 
 Configure your own name and optional aliases in Settings. There is no built-in
 personal identity. Import mode is saved locally:
 
 - **My Assignments**: new rows must have an exact normalized roster match for the
-  entered name or an alias. Already matched saved work remains reviewable when
-  a schedule changes its photographer. Unknown names are never invented.
+  entered name or an alias. This filter also applies to updates; rows assigned
+  only to someone else are skipped. Unknown names are never invented.
 - **All Assignments**: consider every valid schedule row.
-- **Review Each Import**: consider every valid row, with changes unselected until
-  explicitly chosen. Unchanged rows need no write.
+The retired Review Each Import UI is removed. Existing stored review preferences
+fall back to My Assignments; unchanged rows need no write.
 
 Paste a dated text schedule or upload a `.txt` / `.json` file. Text supports the
 existing sample layout: weekday/month/day date headers, optional explicit year,
@@ -26,7 +32,8 @@ of being silently accepted. A file is read locally, never uploaded to a server.
 
 Arrival, start, end, location, address, photographer roster, and assignment type
 are separate fields. Photographer rosters use a trailing comma-separated list
-or an explicit `Photographers:` / `Staff:` label (required for single names).
+or explicit `Photographers:` / `Staff:` labels in separated fields. Single
+trailing names and configured names in separated leading/middle fields are supported.
 Known type suffixes include Faculty Individuals/Groups, Sportsmates, Senior
 Sports, and Senior Makeups (`SR27 MU`). Other types can use `School | Type` or
 separate JSON fields. Unknown type boundaries remain unspecified for review.
@@ -48,12 +55,11 @@ Source IDs must be unique and stable across uploads from the schedule system.
 Do not reuse an ID for a different session. Existing exported app UUIDs are not
 fabricated into schedule IDs during migration.
 
-Preview shows New, Updated, Unchanged, and Ambiguous counts, skipped exact upload
-duplicates, and field-by-field differences. Missing/blank source values never
-clear saved fields. Select rows to apply; skip others. Ambiguous rows require an
-explicit decision: update a listed saved assignment, add a separate assignment,
-or skip. Protected manual fields have individual opt-in checkboxes for accepting
-a new imported value. Confirmation saves the selected batch only.
+The normal import button applies confident new/updated rows in one operation and
+shows a concise added/updated/unchanged/attention summary. Missing/blank source
+values never clear saved fields. Protected manual values are kept. Uncertain
+matches remain unchanged, with optional collapsed actions to link, add separately,
+or dismiss later. No normal-import preview or assignment checkboxes are required.
 
 ## Matching and duplicate prevention
 
@@ -81,7 +87,7 @@ search/status-filtered views. Select a past date to browse history.
 ## Local migration, provenance, backups, and restoration
 
 - Original `PhotoOpsAssignmentsV1` array and `PhotoOpsSettingsV1` are retained.
-  Loading and previewing do not rewrite existing records. The first confirmed
+  Loading does not rewrite existing records. The first applied
   synchronization adds only needed metadata to affected records, after backup.
 - Imported records keep a `sync.source` snapshot, stable `sync.sourceId`, and
   `sync.lastImportedAt`. Each update retains the full prior assignment values in
@@ -102,9 +108,9 @@ search/status-filtered views. Select a past date to browse history.
   localStorage value. Failed backups/quota errors abort before assignment writes;
   a failed commit leaves the old assignment value intact. A backup can remain
   after a failed attempt. Backups are not silently discarded to free space.
-- The saved assignment value must still match the preview baseline. Web Locks
+- The saved assignment value must still match the import baseline. Web Locks
   serialize bulk writers where supported; an optimistic comparison is used
-  otherwise. Stale previews and stale manual edits are rejected. localStorage
+  otherwise. Stale imports and stale manual edits are rejected. localStorage
   cannot provide a general multi-key/cross-browser transaction or protect against
   unrelated scripts ignoring locks. Assignment and settings values are not
   rewritten together during synchronization.

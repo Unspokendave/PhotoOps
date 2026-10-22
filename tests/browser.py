@@ -87,6 +87,7 @@ try:
    # Explicit aliases and case differences retain the one-click workflow.
    page.locator('[data-tab="settings"]').click();page.locator('#nameAliases').fill('David Denk');page.locator('#nameAliases').press('Tab')
    assert '1 unchanged' in run(page,json.dumps([incoming]),'Other Name')
+   assert '1 need attention' in run(page,partial.replace('Mon, Aug 3','Mon, Aug 10'))
    with page.expect_download() as dl:
     page.locator('[data-tab="settings"]').click();page.locator('#exportBtn').click()
    backup_bytes=Path(dl.value.path()).read_bytes();exported=json.loads(backup_bytes);assert exported['assignments'][0]==old

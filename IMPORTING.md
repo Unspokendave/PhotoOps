@@ -1,6 +1,6 @@
 # Simple schedule importing (PhotoOps 2.1)
 
-Enter **Name to Find**, paste a dated text schedule or upload `.txt` / `.json`,
+Enter **Name to Find**, paste an expanded Gmail message or upload `.txt`, `.html`, `.csv`, `.tsv`, or `.json`,
 then click **Import & Update Schedule**. No preview or per-assignment approval is
 required for confident changes. My Assignments uses the entered name plus optional
 aliases; All Assignments explicitly includes everyone's work. Changing the name
@@ -39,8 +39,9 @@ automatic rescheduling without duplicate assignments.
 
 ## Supported text layouts and name matching
 
-- Weekday/month/day headers, with an optional explicit year. Use explicit years
-  for historical schedules. Existing yearless rollover behavior is preserved.
+- Weekday/month/day headers, with an optional explicit year. Choose **Schedule year** for historical yearless schedules. Explicit heading years
+  take priority; December followed by January advances one year. Operational dates
+  inside rows never set the assignment date.
 - Existing `**C**` / `C` assignment markers and titled/time-bearing assignment rows.
 - Dash/newline-separated school, time, name and location fields.
 - `Photographer:`, `Photographers:`, `Staff:`, or `Assigned to:` name labels at the
@@ -65,9 +66,9 @@ string. Unknown supplied details remain separate from personal notes.
 
 ## Unsupported or ambiguous input
 
-PDFs, images/screenshots, Excel files, arbitrary CSV/HTML tables, schedules without
-supported dates, per-photographer column matrices, and free prose with names mixed
-into descriptions require conversion to supported text/JSON. General `last, first`
+PDFs, images/screenshots, Excel workbooks, headerless multi-column tables, schedules
+without supported dates, per-photographer column matrices, and arbitrary free prose
+require conversion to supported text or headered CSV/TSV/HTML tables. General `last, first`
 lists without labels/configured-name corroboration are ambiguous. Unknown role
 annotations or unlabeled locations indistinguishable from names may require
 explicit photographer labels. No fuzzy partial-name, nickname or surname guessing
@@ -77,8 +78,9 @@ can be parsed automatically.
 When My Assignments cannot identify anyone, the main result says so plainly and
 suggests a labelled name field or explicitly choosing All Assignments. Recognized
 rows for other people are skipped, with a clear no-match result if none match.
-Malformed portions generate a single aggregate attention item, not a wall of raw
-parser warnings. Source text is retained in imported information/attention records.
+Unreadable portions produce one aggregate format notice, not persistent attention
+items. Only uncertain matches relevant to the selected user enter the optional
+attention queue. Source text is retained in imported information/attention records.
 
 ## Data protection
 
@@ -97,8 +99,65 @@ The service worker's cache version changes so the new UI and parser load togethe
 No Team features, external synchronization, or deployment changes are introduced.
 
 Validation: `node --test tests/*.test.js`, `python3 tests/browser.py`, and
-`python3 tests/planner_browser.py`. Browser tests use disposable Chromium contexts
+`python3 tests/planner_browser.py`, and `python3 tests/gmail_browser.py`. Browser tests use disposable Chromium contexts
 at desktop, iPhone and iPad viewport sizes, including uploaded company text,
 changing selected names after saving, repeated imports, updates, optional attention
 resolution, storage failures, history preservation, calendar export and offline
 reload. Physical Safari/iOS devices and unseen user uploads are not claimed tested.
+
+## Gmail production schedules
+
+The exact supplied company text is saved in `tests/fixtures/gmail-production.txt`.
+It contains 20 assignments over three dates; the appointment and unavailable
+lines are excluded. With the supplied full name, tests select Bruton, Grafton,
+and the shared Petsworth assignment. Other tests select Monica and Ben instead.
+No person's name is hardcoded in application logic.
+
+Copy the body after Gmail's **View entire message** option. The app accepts plain
+text and rich clipboard HTML, preserves bullet/date boundaries, ignores styling,
+and removes quoted email history from rich content. HTML is parsed in an inert
+template: supplied scripts and markup are never inserted into the page. No email
+account connection is used. Clipped text cannot be recovered automatically; a
+single notice asks you to expand the message. Headers before the schedule and
+recognized forwarded/signature sections are excluded. Copy only the schedule body
+when unrelated prose is mixed into it.
+
+The earlier parser expected separated name fields and could reject a whole crew
+if any member had an abbreviation, school code, or operational annotation. It
+could not reliably bound names after production markers. The new parser reads
+crew sections after LS, kc, sj, or K, matches the entered full name/aliases exactly,
+and does not require every coworker to be recognized. Unknown coworkers and
+unrelated rows produce no attention records. Notes, codes, full source text, and
+addresses are retained. Setup/arrival and session times are separate when labelled;
+multiple unlabelled time points are preserved in notes rather than inventing an
+end time. Colors have no inferred meaning without a supplied legend.
+
+Headered HTML/CSV/TSV imports preserve cells, quoted line breaks, date inheritance,
+and extra column values. HTML tables support spanning cells. Arbitrary nested
+spreadsheet layouts and color-only semantics are not supported. Screenshots are
+not OCR inputs. Unknown role markers or names embedded in arbitrary prose need an
+explicit `Photographers:` field; there is no fuzzy name or surname guessing.
+
+A visible optional year setting defaults to the current year. Month/day headings
+alone cannot establish a historical year. Explicit years override the selection.
+Dates inside operational notes are never used to change the active day.
+
+Matching uses source IDs when supplied, then conservative corroborated identity
+and same-day matches. A moved date without a source ID may need optional manual
+linking when identity is uncertain. It never overwrites a plausible different
+assignment. Historical omissions are preserved, identical repeats are skipped,
+and existing backups, atomic recovery journal, history/restore, and preservation
+of manual fields remain in place.
+
+During an explicit import, equivalent pending issues are compacted, retaining
+candidate IDs, merged issue IDs and messages. Different revisions remain distinct.
+Legacy machine-generated unknown-photographer warnings are archived, not deleted;
+backups retain the original queue. Only active relevant issues render, on demand,
+in batches of 20. Startup never clears saved assignments or attention data.
+
+Automated coverage uses the supplied text, rich/plain clipboard variants, a
+headered HTML table, structured CSV/TSV, year transitions, exact/overlapping names,
+updates/repeats, preserved historical/manual data, attention compaction, and a
+1,000-row synthetic email. Browser checks cover desktop, iPhone and iPad viewport
+sizes with Chromium, including refresh/offline loading. Physical Safari/iOS and
+unseen email formats remain unverified.

@@ -113,11 +113,13 @@
 
         <label for="importMode">Import mode</label>
         <select id="importMode"><option value="mine">My Assignments</option><option value="all">All Assignments</option></select>
-        <label for="scheduleFile">Upload schedule (.txt or .json)</label>
-        <input id="scheduleFile" type="file" accept=".txt,.json,text/plain,application/json" />
+        <label for="scheduleFile">Upload schedule (.txt, .html, .csv, .tsv or .json)</label>
+        <input id="scheduleFile" type="file" accept=".txt,.json,.html,.htm,.csv,.tsv,text/plain,text/html,text/csv,application/json" />
+        <p class="field-hint">In Gmail, choose “View entire message” if the email is clipped, then copy the expanded body. Rich-text and plain-text paste are supported; no Gmail connection is needed.</p>
+        <details class="import-options"><summary>Schedule year</summary><label for="scheduleYear">Year for headings without a year</label><input id="scheduleYear" type="number" min="1900" max="2200" step="1" /><p>Starts with the current year unless you choose another. December followed by January advances one year. Explicit years in headings take priority.</p></details>
         <details class="import-help"><summary>Supported schedule formats</summary>
           <p>Text schedules need weekday/month/day headings (for example, Mon, Nov 2, 2026). Names can appear after the assignment, in a separated name field, or as Photographers: followed by one or more names. Shared names may be separated by commas, semicolons, &amp;, or “and”. School, time, and name fields should be separated by a dash or a new line.</p>
-          <p>Use the full name shown on the schedule, or add alternate forms in Settings. Case, extra spaces, periods, and “last, first” variations are supported; partial first-name matches are not guessed. JSON schedules support an assignments array with school, date, times, and photographer names. PDFs, images, spreadsheets, and arbitrary tables must first be converted to supported text or JSON.</p>
+          <p>Use the full name shown on the schedule, or add alternate forms in Settings. Case, extra spaces, periods, and “last, first” variations are supported; partial first-name matches are not guessed. JSON schedules support an assignments array with school, date, times, and photographer names. Gmail bullets and LS/kc/sj/K name fields are supported. HTML tables and CSV/TSV need labelled School and date/name columns. Export Excel workbooks first; screenshots and PDFs cannot reliably supply schedule text.</p>
         </details>
         <label for="scheduleText">Paste schedule</label>
         <textarea id="scheduleText" rows="16" placeholder="Paste the work schedule here..."></textarea>
@@ -131,6 +133,7 @@
           <div id="attentionItems"></div>
         </details>
         <p id="importMessage" class="message" aria-live="polite"></p>
+        <p id="importFormatMessage" class="field-hint" aria-live="polite"></p>
       </article>
     </section>
 
@@ -268,6 +271,7 @@
 
   <script src="planner.js"></script>
   <script src="storage.js"></script>
+  <script src="formats.js"></script>
   <script src="sync.js"></script>
   <script src="app.js"></script>
 </body>

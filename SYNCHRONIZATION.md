@@ -22,17 +22,19 @@ personal identity. Import mode is saved locally:
 The retired Review Each Import UI is removed. Existing stored review preferences
 fall back to My Assignments; unchanged rows need no write.
 
-Paste a dated text schedule or upload a `.txt` / `.json` file. Text supports the
+Paste an expanded Gmail schedule (plain or rich text), or upload a `.txt`, `.html`,
+`.csv`, `.tsv`, or `.json` file. Text supports the
 existing sample layout: weekday/month/day date headers, optional explicit year,
 `**C**` / `C` assignment boundaries, and school/type followed by hyphen-separated
 information. New titled timed or recognized-type rows also create boundaries.
-Use explicit years for historical imports; yearless dates use the original
-current-year/rollover heuristic. Text that cannot be parsed is reported instead
+Choose Schedule year for historical yearless imports. Explicit years take
+priority; December-to-January headings advance one year. Text that cannot be parsed is reported instead
 of being silently accepted. A file is read locally, never uploaded to a server.
 
 Arrival, start, end, location, address, photographer roster, and assignment type
 are separate fields. Photographer rosters use a trailing comma-separated list
-or explicit `Photographers:` / `Staff:` labels in separated fields. Single
+or explicit `Photographers:` / `Staff:` labels in separated fields, as well as
+production crew sections after LS/kc/sj/K. Single
 trailing names and configured names in separated leading/middle fields are supported.
 Known type suffixes include Faculty Individuals/Groups, Sportsmates, Senior
 Sports, and Senior Makeups (`SR27 MU`). Other types can use `School | Type` or

@@ -1,3 +1,6 @@
+const Formats = PhotoOpsFormats;
+let richSchedule = null;
+let attentionLimit = 20;
 const Planner = PhotoOpsPlanner;
 const Store = PhotoOpsStore;
 // Complete or roll back an interrupted two-store backup restoration before reading data.
@@ -33,6 +36,7 @@ tabs.forEach(tab => tab.addEventListener("click", () => {
   panels.forEach(p => p.classList.remove("active"));
   tab.classList.add("active");
   $(tab.dataset.tab).classList.add("active");
+  if(tab.dataset.tab==="schedule")applyScheduleFilters();
 }));
 
 $("themeBtn").addEventListener("click", () => {
@@ -82,14 +86,24 @@ async function commitBulk(next, expected, nextSchools, expectedSchools, nextAtte
 }
 
 $("nameAliases").addEventListener("change", () => { settings.aliases = $("nameAliases").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean); saveSettings(); cancelPreview(); });
-$("importMode").addEventListener("change", () => { settings.importMode = $("importMode").value; saveSettings(); cancelPreview(); });
+$("importMode").addEventListener("change", () => { settings.importMode = $("importMode").value; saveSettings(); cancelPreview(); renderAttention(); });
+$("scheduleYear").value = settings.scheduleYear || new Date().getFullYear();
+$("scheduleYear").addEventListener("change",()=>{settings.scheduleYear=Number($("scheduleYear").value);saveSettings();cancelPreview();});
 $("scheduleFile").addEventListener("change", async e => {
   const file=e.target.files[0]; if (!file) return;
-  try { $("scheduleText").value=await file.text(); cancelPreview(); }
-  catch { $("importMessage").textContent="The schedule file could not be read."; }
+  try {
+    if(!/\.(?:txt|json|csv|tsv|html?)$/i.test(file.name))throw new Error("Use expanded email text, HTML, CSV/TSV with headers, or JSON. Images, PDFs and Excel workbooks must be exported first.");
+    const text=await file.text();richSchedule=/^\s*</.test(text)?text:null;
+    $("scheduleText").value=richSchedule?Formats.gmailText(text):text;cancelPreview();
+  } catch(error) { $("importMessage").textContent=error.message; }
 });
-$("scheduleText").addEventListener("input", cancelPreview);
-$("nameFilter").addEventListener("input", cancelPreview);
+$("scheduleText").addEventListener("paste",event=>{
+  const html=event.clipboardData?.getData('text/html');
+  if(!html)return;event.preventDefault();
+  richSchedule=html;$("scheduleText").value=Formats.gmailText(html);cancelPreview();
+});
+$("scheduleText").addEventListener("input",()=>{richSchedule=null;cancelPreview();});
+$("nameFilter").addEventListener("input",()=>{cancelPreview();renderAttention();});
 $("syncBackupBtn").addEventListener("click", () => {
   const keys=Object.keys(localStorage).filter(k=>k.startsWith(BACKUP_PREFIX)).sort();
   if(!keys.length) { alert("No safety backups yet. One is saved before synchronization or backup restoration."); return; }
@@ -162,7 +176,7 @@ function renderAll() {
   $("tentativeCount").textContent = assignments.filter(a => ["tentative","tbd"].includes(a.status)).length;
 
   renderList($("dashboardList"), upcoming.slice(0,6));
-  applyScheduleFilters();
+  if($("schedule").classList.contains("active"))applyScheduleFilters();
 
   const next = upcoming[0];
   $("nextAssignment").innerHTML = next
@@ -400,12 +414,18 @@ $("deleteAssignmentBtn").addEventListener("click", () => {
   }
 });
 
-function cancelPreview() { $("importMessage").textContent=""; }
+function cancelPreview() { $("importMessage").textContent=""; $("importFormatMessage").textContent=""; }
+function relevantAttention() {
+  const names=[$("nameFilter").value,...(settings.aliases || [])].filter(Boolean);
+  return attention.filter(item=>!item.archived && item.incoming && (item.candidates || []).length && ($("importMode").value==='all' || Sync.rowMatches(item.incoming,names)));
+}
 function renderAttention() {
-  $("importAttention").hidden=!attention.length;
-  $("attentionSummary").textContent=`${attention.length} saved item${attention.length===1?"":"s"} need attention (optional)`;
+  const active=relevantAttention();
+  $("importAttention").hidden=!active.length;
+  $("attentionSummary").textContent=`${active.length} saved item${active.length===1?"":"s"} need attention (optional)`;
   $("attentionItems").replaceChildren();
-  for(const item of attention) {
+  if(!$("importAttention").open)return;
+  for(const item of active.slice(0,attentionLimit)) {
     const article=document.createElement("article");article.className="sync-row";
     const text=document.createElement("p");text.textContent=[item.incoming?.school,item.incoming?.date,item.message].filter(Boolean).join(" — ");article.append(text);
     const decision=document.createElement("select");decision.setAttribute("aria-label",`Match saved assignment for ${item.incoming?.school || 'item'}`);
@@ -430,35 +450,40 @@ function renderAttention() {
     const dismiss=document.createElement("button");dismiss.type="button";dismiss.className="secondary-btn";dismiss.textContent="Dismiss";dismiss.addEventListener("click",()=>resolve('dismiss'));article.append(dismiss);
     $("attentionItems").append(article);
   }
+  if(active.length>attentionLimit){const more=document.createElement('button');more.type='button';more.className='secondary-btn';more.textContent='Show 20 more';more.addEventListener('click',()=>{attentionLimit+=20;renderAttention();});$("attentionItems").append(more);}
 }
+$("importAttention").addEventListener('toggle',()=>{if($("importAttention").open)renderAttention();});
 function issueKey(item) {return JSON.stringify(item.incoming || item.message);}
 $("importBtn").addEventListener("click",async()=>{
   const button=$("importBtn");button.disabled=true;
+  $("importAttention").open=false;attentionLimit=20;
+  await new Promise(resolve=>requestAnimationFrame(resolve));
   try {
     const name=$("nameFilter").value.trim(),aliases=settings.aliases || [],mode=$("importMode").value;
     if(mode==='mine' && !name && !aliases.length)throw new Error("Enter a photographer name or choose All Assignments.");
-    const input=$("scheduleText").value.trim();if(!input)throw new Error("Paste a schedule or upload a file first.");
-    const parsed=Sync.parse(input,new Date(),[name,...aliases].filter(Boolean));
+    const input=richSchedule || $("scheduleText").value.trim();if(!input)throw new Error("Paste a schedule or upload a file first.");
+    const parsed=Sync.parse(input,new Date(),[name,...aliases].filter(Boolean),{year:Number($("scheduleYear").value)});
     const expected=localStorage.getItem(STORAGE_KEY),saved=JSON.parse(expected || "[]");
     const result=Sync.automatic(saved,parsed.rows,{name,aliases,mode});
-    const unknown=mode==='mine'?parsed.rows.filter(a=>!a.photographers?.length):[];
-    const issues=[...result.attention,...unknown.map(incoming=>({incoming,candidates:[],message:'No photographer could be identified for this entry. It was not imported.'}))];
-    if(parsed.warnings.length)issues.push({message:`${parsed.warnings.length} part${parsed.warnings.length===1?'':'s'} of the file could not be fully read. Use dated text entries or the documented JSON fields; no saved assignments were removed.`});
-    const expectedQueue=localStorage.getItem(ATTENTION_KEY),queue=JSON.parse(expectedQueue || "[]");
-    for(const issue of issues)if(!queue.some(old=>issueKey(old)===issueKey(issue)))queue.push({...issue,id:crypto.randomUUID()});
-    if(result.counts.added || result.counts.updated || queue.length!==JSON.parse(expectedQueue || "[]").length)await commitBulk(result.next,expected,undefined,undefined,queue,expectedQueue);
+    const issues=result.attention;
+    const expectedQueue=localStorage.getItem(ATTENTION_KEY);
+    const queue=Sync.compactAttention([...JSON.parse(expectedQueue || "[]"),...issues.map(issue=>({...issue,id:crypto.randomUUID()}))]);
+    if(result.counts.added || result.counts.updated || JSON.stringify(queue)!==JSON.stringify(JSON.parse(expectedQueue || "[]")))await commitBulk(result.next,expected,undefined,undefined,queue,expectedQueue);
     else {assignments=saved;loadedRaw=expected;attention=queue;renderAttention();renderAll();}
     $("importAttention").open=false;
     let explanation='';
     if(!parsed.rows.length)explanation=' No supported assignments were found. Use dated text entries or a JSON schedule; see the supported formats.';
-    else if(mode==='mine' && unknown.length===parsed.rows.length)explanation=' No photographer names could be identified. Nothing was imported. Add a Photographers: name field or choose All Assignments.';
+    else if(mode==='mine' && parsed.rows.every(row=>!row.photographers?.length))explanation=' No photographer names could be identified. Nothing was imported. Add a Photographers: name field or choose All Assignments.';
     else if(mode==='mine' && !result.counts.added && !result.counts.updated && !result.counts.unchanged && !issues.length)explanation=' No assignments matched that name or its aliases. Try the exact name used in the schedule.';
+    const clipped=/message clipped|view entire message/i.test(input);
+    $("importFormatMessage").textContent=clipped?'Gmail may have clipped this email. Choose View entire message and copy the expanded email before importing again.':parsed.warnings.length?'Some entries could not be read completely. Check the supported formats; saved history was kept.':'';
     $("importMessage").textContent=`Import complete: ${result.counts.added} added, ${result.counts.updated} updated, ${result.counts.unchanged} unchanged, ${issues.length} need attention.${explanation}`;
   }catch(error){$("importMessage").textContent=`Import stopped. Saved assignments were not changed: ${error.message}`;}
   finally{button.disabled=false;}
 });
 
 $("sampleBtn").addEventListener("click",()=>{
+  richSchedule=null;
   const name=$("nameFilter").value.trim() || (settings.aliases || [])[0] || "Sample Photographer";
   $("scheduleText").value=`Mon, Nov 2, ${new Date().getFullYear()}
 [ID: sample-1] Example HS Faculty Individuals - arrival 8:30am - start 9:00am - end 1:00pm - gym - Photographers: ${name}`;
